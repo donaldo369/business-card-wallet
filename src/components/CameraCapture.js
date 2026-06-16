@@ -5,16 +5,15 @@ import { Image, MoreHorizontal, X, Zap, ZapOff } from 'lucide-react';
 
 export default function CameraCapture({ onImageSelected, onClose, onManualInput }) {
   const videoRef = useRef(null);
-  const canvasRef = useRef(null); // 실시간 오렌지 박스 드로잉용 오버레이 캔버스
+  const canvasRef = useRef(null); // 실시간 오버레이 캔버스
   const fileInputRef = useRef(null);
   const streamRef = useRef(null);
   const detectIntervalRef = useRef(null);
 
   const [flashOn, setFlashOn] = useState(false);
   const [hasCameraPermission, setHasCameraPermission] = useState(null);
-  const [detectedBox, setDetectedBox] = useState(null); // 실시간 감지된 명함 좌표
+  const [detectedBox, setDetectedBox] = useState(null); // 실시간 감지 좌표
 
-  // 1. 카메라 스트림 구동
   useEffect(() => {
     startCamera();
     return () => {
@@ -42,7 +41,6 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
         videoRef.current.onloadedmetadata = () => {
           videoRef.current.play();
           setHasCameraPermission(true);
-          // 실시간 명함 영역 감지 루프 시작
           startLiveDetection();
         };
       }
@@ -62,7 +60,6 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
     }
   };
 
-  // 플래시 토글 (일부 모바일 브라우저/기기 지원)
   const toggleFlash = async () => {
     if (streamRef.current) {
       const track = streamRef.current.getVideoTracks()[0];
@@ -82,13 +79,12 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
     }
   };
 
-  // 2. 실시간 명함 영역 경계선 감지 루프
+  // 실시간 명함 영역 경계선 감지 루프
   const startLiveDetection = () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
 
-    // 감지 연산용 히든 임시 캔버스
     const procCanvas = document.createElement('canvas');
     const procCtx = procCanvas.getContext('2d');
 
@@ -99,7 +95,6 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
       const vH = video.videoHeight;
       if (!vW || !vH) return;
 
-      // 오버레이 캔버스 크기 맞춤
       if (canvas.width !== video.clientWidth || canvas.height !== video.clientHeight) {
         canvas.width = video.clientWidth;
         canvas.height = video.clientHeight;
@@ -113,13 +108,14 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
       try {
         procCtx.drawImage(video, 0, 0, procCanvas.width, procCanvas.height);
         const imgData = procCtx.getImageData(0, 0, procCanvas.width, procCanvas.height);
-        const box = analyzeFrame(imgData, procCanvas.width, procCanvas.height);
+        
+        // 고성능 로컬 그래디언트(엣지) 감지 알고리즘 적용
+        const box = detectEdgesSobel(imgData, procCanvas.width, procCanvas.height);
 
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         if (box) {
-          // 화면 뷰포트 크기로 비율 확대 변환
           const ratioX = canvas.width / procCanvas.width;
           const ratioY = canvas.height / procCanvas.height;
 
@@ -130,7 +126,6 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
             h: box.h * ratioY
           };
 
-          // 비디오 화면 좌표 기준 세팅
           setDetectedBox({
             x: box.x / scale,
             y: box.y / scale,
@@ -138,12 +133,11 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
             h: box.h / scale
           });
 
-          // 주황색 반투명 오버레이 박스 드로잉 (사용자 스크린샷 가이드 매칭)
-          ctx.fillStyle = 'rgba(255, 122, 89, 0.25)'; // 주황색 반투명
-          ctx.strokeStyle = '#ff7a59'; // 주황 테두리
+          // 주황색 반투명 오버레이 박스 렌더링
+          ctx.fillStyle = 'rgba(255, 122, 89, 0.22)';
+          ctx.strokeStyle = '#ff7a59';
           ctx.lineWidth = 3;
           
-          // 모서리가 둥근 사각형 그리기
           const r = 12;
           ctx.beginPath();
           ctx.moveTo(screenBox.x + r, screenBox.y);
@@ -164,79 +158,105 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
       } catch (e) {
         // 백그라운드 프레임 획득 에러시 무시
       }
-    }, 200); // 초당 5회 연산
+    }, 150); // 약 0.15초마다 감지 루프
   };
 
-  // 실시간 영상 분석 핵심 알고리즘 (배경 대비 외곽 경계선 검출)
-  const analyzeFrame = (imgData, width, height) => {
+  // 로컬 미분 필터(Sobel/Gradient) 기반 명함 사각형 윤곽 검출 알고리즘
+  const detectEdgesSobel = (imgData, width, height) => {
     const data = imgData.data;
-    const getPixel = (x, y) => {
-      const idx = (y * width + x) * 4;
-      return { r: data[idx], g: data[idx+1], b: data[idx+2] };
-    };
+    
+    // 1. 그레이스케일(Grayscale) 변환 및 노이즈 제거용 엣지 맵 생성
+    const gray = new Uint8Array(width * height);
+    for (let i = 0; i < width * height; i++) {
+      const r = data[i * 4];
+      const g = data[i * 4 + 1];
+      const b = data[i * 4 + 2];
+      gray[i] = 0.299 * r + 0.587 * g + 0.114 * b; // 표준 그레이 밝기 변환
+    }
 
-    // 네 모퉁이 배경색 평균
-    const corners = [getPixel(0, 0), getPixel(width-1, 0), getPixel(0, height-1), getPixel(width-1, height-1)];
-    const avgBg = {
-      r: corners.reduce((acc, c) => acc + c.r, 0) / 4,
-      g: corners.reduce((acc, c) => acc + c.g, 0) / 4,
-      b: corners.reduce((acc, c) => acc + c.b, 0) / 4,
-    };
+    // 2. 인접 픽셀간 밝기 변화량(경사도) 계산
+    const edge = new Uint8Array(width * height);
+    const gradThreshold = 18; // 엣지로 분류할 최소 임계치
+    
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const idx = y * width + x;
+        
+        // 단순 차분 필터 (수평 & 수직 변화량 합산)
+        const dx = gray[idx + 1] - gray[idx - 1];
+        const dy = gray[(y + 1) * width + x] - gray[(y - 1) * width + x];
+        const magnitude = Math.sqrt(dx * dx + dy * dy);
+        
+        edge[idx] = magnitude > gradThreshold ? 255 : 0;
+      }
+    }
 
-    const colorDist = (c1, c2) => {
-      return Math.sqrt(Math.pow(c1.r - c2.r, 2) + Math.pow(c1.g - c2.g, 2) + Math.pow(c1.b - c2.b, 2));
-    };
-
-    const threshold = 30;
+    // 3. 외곽에서 안쪽으로 탐색하며 엣지 누적 밀도가 상승하는 선(Line) 검출
     let top = 0, bottom = height - 1, left = 0, right = width - 1;
+    const lineRatioThreshold = 0.08; // 해당 라인의 엣지 비율 조건 (최소 8% 이상 엣지 존재)
 
-    // Top
-    for (let y = 0; y < height; y++) {
-      let found = false;
+    // Top 탐색
+    for (let y = 4; y < height * 0.5; y++) {
+      let edgeCount = 0;
       for (let x = 0; x < width; x++) {
-        if (colorDist(getPixel(x, y), avgBg) > threshold) { top = y; found = true; break; }
+        if (edge[y * width + x] > 0) edgeCount++;
       }
-      if (found) break;
+      if (edgeCount > width * lineRatioThreshold) {
+        top = y;
+        break;
+      }
     }
 
-    // Bottom
-    for (let y = height - 1; y >= 0; y--) {
-      let found = false;
+    // Bottom 탐색
+    for (let y = height - 5; y > height * 0.5; y--) {
+      let edgeCount = 0;
       for (let x = 0; x < width; x++) {
-        if (colorDist(getPixel(x, y), avgBg) > threshold) { bottom = y; found = true; break; }
+        if (edge[y * width + x] > 0) edgeCount++;
       }
-      if (found) break;
+      if (edgeCount > width * lineRatioThreshold) {
+        bottom = y;
+        break;
+      }
     }
 
-    // Left
-    for (let x = 0; x < width; x++) {
-      let found = false;
+    // Left 탐색
+    for (let x = 4; x < width * 0.5; x++) {
+      let edgeCount = 0;
       for (let y = 0; y < height; y++) {
-        if (colorDist(getPixel(x, y), avgBg) > threshold) { left = x; found = true; break; }
+        if (edge[y * width + x] > 0) edgeCount++;
       }
-      if (found) break;
+      if (edgeCount > height * lineRatioThreshold) {
+        left = x;
+        break;
+      }
     }
 
-    // Right
-    for (let x = width - 1; x >= 0; x--) {
-      let found = false;
+    // Right 탐색
+    for (let x = width - 5; x > width * 0.5; x--) {
+      let edgeCount = 0;
       for (let y = 0; y < height; y++) {
-        if (colorDist(getPixel(x, y), avgBg) > threshold) { right = x; found = true; break; }
+        if (edge[y * width + x] > 0) edgeCount++;
       }
-      if (found) break;
+      if (edgeCount > height * lineRatioThreshold) {
+        right = x;
+        break;
+      }
     }
 
     const w = right - left;
     const h = bottom - top;
 
-    // 감지 영역 크기가 명함 규격(최소 25% 이상 차지)으로 유효할 때만 반환
-    if (w > width * 0.25 && h > height * 0.25) {
-      return { x: left, y: top, w, h };
+    // 감지 영역이 너무 크거나(전체 화면 오검출) 너무 작은 경우 제외하는 안전 검사 추가
+    if (w > width * 0.25 && w < width * 0.94 && h > height * 0.25 && h < height * 0.94) {
+      // 명함의 표준 가로세로 비율(약 1.4 ~ 1.8 사이) 체크하여 오검출 방지
+      const ratio = w / h;
+      if (ratio > 1.2 && ratio < 2.0) {
+        return { x: left, y: top, w, h };
+      }
     }
     return null;
   };
 
-  // 3. 사진 촬영 및 자동 자르기(Crop) 수행
   const handleCapture = () => {
     const video = videoRef.current;
     if (!video) return;
@@ -248,20 +268,16 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     
-    // 자동 검출된 오렌지 박스가 있는 경우
     if (detectedBox) {
-      // 캔버스 크기를 명함 크기만큼만 생성 (촬영 단계부터 자동 자르기 구현!)
       canvas.width = detectedBox.w;
       canvas.height = detectedBox.h;
-
-      // 비디오 프레임에서 명함 영역만 슬라이스해서 복사
       ctx.drawImage(
         video,
-        detectedBox.x, detectedBox.y, detectedBox.w, detectedBox.h, // Source
-        0, 0, canvas.width, canvas.height // Destination
+        detectedBox.x, detectedBox.y, detectedBox.w, detectedBox.h,
+        0, 0, canvas.width, canvas.height
       );
     } else {
-      // 감지 실패 시, 중앙 영역을 기본 명함 비율(1.58)로 자동 자르기
+      // 감지 실패 시, 중앙 영역 자동 자르기
       const targetW = vW * 0.8;
       const targetH = targetW / 1.586;
       const startX = (vW - targetW) / 2;
@@ -278,24 +294,22 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
     }
 
     const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-    onImageSelected(dataUrl); // 크롭 과정 없이 바로 업로드 및 OCR 단계로 전달
+    onImageSelected(dataUrl);
     stopCamera();
   };
 
-  // 4. 사진첩 선택 시 처리
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onload = (event) => {
         if (event.target?.result) {
-          // 사진첩 이미지도 불러온 직후 바로 자동 경계 감지 후 크롭 처리!
           const img = new Image();
           img.onload = () => {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             
-            // 사진첩 이미지 전용 자동 감지 수행
+            // 사진첩 이미지도 동일한 에지 검출 헬퍼 적용
             const box = analyzeFrameImage(img);
             if (box) {
               canvas.width = box.w;
@@ -318,7 +332,6 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
     }
   };
 
-  // 사진첩용 프레임 분석 헬퍼
   const analyzeFrameImage = (imgElement) => {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
@@ -327,7 +340,7 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
     canvas.height = imgElement.naturalHeight * scale;
     ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
     const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const box = analyzeFrame(imgData, canvas.width, canvas.height);
+    const box = detectEdgesSobel(imgData, canvas.width, canvas.height);
     if (box) {
       return {
         x: box.x / scale,
@@ -456,7 +469,7 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
           display: 'flex',
           justifyContent: 'space-around',
           alignItems: 'center',
-          padding: '28px 20px 48px 20px', // 모바일 홈 인디케이터 고려 하단 패딩 확보
+          padding: '28px 20px 48px 20px',
           background: 'rgba(0,0,0,0.85)',
           zIndex: 110
         }}
@@ -515,7 +528,7 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
               width: '62px',
               height: '62px',
               borderRadius: '50%',
-              backgroundColor: '#ff5722', // 오렌지색 핵심 단추
+              backgroundColor: '#ff5722',
               transition: 'transform 0.1s'
             }}
             onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.92)'}
@@ -559,7 +572,6 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
         </button>
       </div>
 
-      {/* 숨겨진 사진첩 선택용 File Input */}
       <input
         type="file"
         ref={fileInputRef}
