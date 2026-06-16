@@ -231,6 +231,19 @@ export default function Home() {
 
       if (error) throw error;
 
+      // 이미 HubSpot에 연동된 카드인 경우, HubSpot 연락처 정보도 자동 업데이트
+      if (editingCard.id && editingCard.hubspot_id) {
+        try {
+          await syncToHubSpot({
+            ...cardData,
+            id: editingCard.id,
+            hubspot_id: editingCard.hubspot_id
+          });
+        } catch (hubspotErr) {
+          console.warn('HubSpot 자동 업데이트 실패:', hubspotErr);
+        }
+      }
+
       alert('명함이 성공적으로 저장되었습니다.');
       setEditingCard(null);
       setCroppedImage(null);
@@ -720,10 +733,15 @@ export default function Home() {
                 </button>
 
                 {viewingCard.hubspot_id ? (
-                  <div className="btn btn-success-badge">
+                  <button 
+                    onClick={() => syncToHubSpot(viewingCard)} 
+                    disabled={loading} 
+                    className="btn" 
+                    style={{ background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.25)', color: '#34d399' }}
+                  >
                     <Check size={14} />
-                    HubSpot 연동됨
-                  </div>
+                    HubSpot 업데이트
+                  </button>
                 ) : (
                   <button onClick={() => syncToHubSpot(viewingCard)} disabled={loading} className="btn btn-hubspot">
                     <ExternalLink size={14} />
