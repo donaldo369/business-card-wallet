@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useState, useEffect } from 'react';
-import { Image, MoreHorizontal, X, Zap, ZapOff } from 'lucide-react';
+import { Image as ImageIcon, MoreHorizontal, X, Zap, ZapOff } from 'lucide-react';
 
 export default function CameraCapture({ onImageSelected, onClose, onManualInput }) {
   const videoRef = useRef(null);
@@ -88,8 +88,34 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
     const procCanvas = document.createElement('canvas');
     const procCtx = procCanvas.getContext('2d');
 
+    const drawDefaultGuideBox = (ctx, cW, cH) => {
+      const targetW = cW * 0.82;
+      const targetH = targetW / 1.586; // 명함 가로세로 비율
+      const x = (cW - targetW) / 2;
+      const y = (cH - targetH) / 2;
+
+      ctx.strokeStyle = 'rgba(255, 122, 89, 0.55)';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([6, 6]); // 점선 가이드라인
+
+      const r = 14;
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + targetW - r, y);
+      ctx.quadraticCurveTo(x + targetW, y, x + targetW, y + r);
+      ctx.lineTo(x + targetW, y + targetH - r);
+      ctx.quadraticCurveTo(x + targetW, y + targetH, x + targetW - r, y + targetH);
+      ctx.lineTo(x + r, y + targetH);
+      ctx.quadraticCurveTo(x, y + targetH, x, y + targetH - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.setLineDash([]); // 점선 원복
+    };
+
     detectIntervalRef.current = setInterval(() => {
-      if (video.paused || video.ended) return;
+      if (video.paused || video.ended || video.readyState < 2) return;
 
       const vW = video.videoWidth;
       const vH = video.videoHeight;
@@ -116,27 +142,38 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         if (box) {
-          const ratioX = canvas.width / procCanvas.width;
-          const ratioY = canvas.height / procCanvas.height;
+          const cW = canvas.width;
+          const cH = canvas.height;
+
+          // object-fit: cover 배율 및 오프셋 계산
+          const s = Math.max(cW / vW, cH / vH);
+          const offsetX = (cW - vW * s) / 2;
+          const offsetY = (cH - vH * s) / 2;
+
+          // 원본 비디오 해상도로 복원
+          const origX = box.x / scale;
+          const origY = box.y / scale;
+          const origW = box.w / scale;
+          const origH = box.h / scale;
 
           const screenBox = {
-            x: box.x * ratioX,
-            y: box.y * ratioY,
-            w: box.w * ratioX,
-            h: box.h * ratioY
+            x: origX * s + offsetX,
+            y: origY * s + offsetY,
+            w: origW * s,
+            h: origH * s
           };
 
           setDetectedBox({
-            x: box.x / scale,
-            y: box.y / scale,
-            w: box.w / scale,
-            h: box.h / scale
+            x: origX,
+            y: origY,
+            w: origW,
+            h: origH
           });
 
-          // 주황색 반투명 오버레이 박스 렌더링
+          // 주황색 반투명 오버레이 박스 렌더링 (실시간 스냅)
           ctx.fillStyle = 'rgba(255, 122, 89, 0.24)';
           ctx.strokeStyle = '#ff7a59';
-          ctx.lineWidth = 3.5;
+          ctx.lineWidth = 4;
           
           const r = 14;
           ctx.beginPath();
@@ -154,9 +191,11 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
           ctx.stroke();
         } else {
           setDetectedBox(null);
+          // 명함 감지 전에는 화면 중앙에 점선 가이드 박스 표시
+          drawDefaultGuideBox(ctx, canvas.width, canvas.height);
         }
       } catch (e) {
-        // 에러 무시
+        console.error('실시간 감지 루프 에러:', e);
       }
     }, 120); // 프레임 속도 개선 (초당 8회 감지)
   };
@@ -191,9 +230,11 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
     const marginX = Math.floor(width * 0.05);
     const marginY = Math.floor(height * 0.05);
     
-    let minX = width, maxX = 0, minY = height, maxY = 0;
-    let foregroundPixels = 0;
+    const xs = [];
+    const ys = [];
     const threshold = 28; // 유연한 감지를 위해 감도 완화
+
+    const isBgBright = (avgBg.r + avgBg.g + avgBg.b) / 3 > 160;
 
     for (let y = marginY; y < height - marginY; y++) {
       for (let x = marginX; x < width - marginX; x++) {
@@ -201,29 +242,43 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
         
         // 배경과 다른 색상이거나, 아주 밝은색(일반 흰색 명함 특성 반영)인 경우 명함 영역으로 판단
         const isContrast = colorDist(pixel, avgBg) > threshold;
-        const isBright = (pixel.r + pixel.g + pixel.b) / 3 > 165; // 명함 흰색 필터링 추가
+        // 배경이 이미 밝은 경우(예: 흰 테이블/장판) 단순 밝기 필터링은 비활성화하여 오작동 방지
+        const isBright = !isBgBright && ((pixel.r + pixel.g + pixel.b) / 3 > 165);
 
         if (isContrast || isBright) {
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-          foregroundPixels++;
+          xs.push(x);
+          ys.push(y);
         }
       }
     }
 
+    if (xs.length < 80) return null; // 최소 필터링 통과 조건
+
+    // 오름차순 정렬하여 외곽의 노이즈/그림자/손가락 제거 (상하위 3% 절삭)
+    xs.sort((a, b) => a - b);
+    ys.sort((a, b) => a - b);
+
+    const discard = Math.floor(xs.length * 0.03);
+    const minX = xs[discard];
+    const maxX = xs[xs.length - 1 - discard];
+    const minY = ys[discard];
+    const maxY = ys[ys.length - 1 - discard];
+
     const w = maxX - minX;
     const h = maxY - minY;
-    const totalArea = (width - 2 * marginX) * (height - 2 * marginY);
-    const density = foregroundPixels / totalArea;
+    
+    if (w <= 0 || h <= 0) return null;
 
-    // 감지 영역이 전체 연산 영역의 12% ~ 80% 사이를 차지할 때 안정적인 명함으로 판단
-    if (w > width * 0.28 && w < width * 0.95 && h > height * 0.25 && h < height * 0.95) {
-      if (density > 0.10 && density < 0.82) {
+    const totalArea = (width - 2 * marginX) * (height - 2 * marginY);
+    const density = xs.length / totalArea;
+
+    // 감지 영역 크기 제약 완화 (더 멀리서 찍거나 작게 찍어도 감지됨)
+    if (w > width * 0.20 && w < width * 0.98 && h > height * 0.18 && h < height * 0.98) {
+      // 밀도 기준 완화
+      if (density > 0.04 && density < 0.90) {
         const ratio = w / h;
-        // 명함 가로세로 비율 오차범위를 여유있게 조정 (기울어짐 대응)
-        if (ratio > 1.0 && ratio < 2.3) {
+        // 세로형 명함 및 기울어짐에 모두 기민하게 대응할 수 있도록 비율 범위 대폭 확장 (0.4 ~ 2.5)
+        if (ratio > 0.4 && ratio < 2.5) {
           return { x: minX, y: minY, w, h };
         }
       }
@@ -277,7 +332,7 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
       const reader = new FileReader();
       reader.onload = (event) => {
         if (event.target?.result) {
-          const img = new Image();
+          const img = document.createElement('img');
           img.onload = () => {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
@@ -474,7 +529,7 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
               justifyContent: 'center'
             }}
           >
-            <Image size={20} />
+            <ImageIcon size={20} />
           </div>
           사진첩
         </button>

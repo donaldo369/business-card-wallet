@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Settings, Search, Plus, Check, Mail, Phone, MapPin, 
   Building2, ExternalLink, Trash2, Edit3, 
@@ -35,6 +35,31 @@ export default function Home() {
   });
 
   const [supabaseReady, setSupabaseReady] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const handleAddNewCard = () => {
+    const isMobile = typeof navigator !== 'undefined' && /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (isMobile) {
+      setShowCapture(true);
+    } else {
+      fileInputRef.current?.click();
+    }
+  };
+
+  const handleDesktopFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          setSelectedImage(event.target.result);
+        }
+      };
+      reader.readAsDataURL(file);
+      // 같은 파일을 연속으로 선택할 수 있도록 벨류 리셋
+      e.target.value = '';
+    }
+  };
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -382,10 +407,17 @@ export default function Home() {
               className="premium-input search-input"
             />
           </div>
-          <button onClick={() => setShowCapture(true)} className="btn btn-primary btn-add">
+          <button onClick={handleAddNewCard} className="btn btn-primary btn-add">
             <Plus size={18} />
             <span>새 명함 추가</span>
           </button>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleDesktopFileChange}
+            accept="image/*"
+            style={{ display: 'none' }}
+          />
         </div>
 
         {/* 촬영 및 스캔 가이드 */}
