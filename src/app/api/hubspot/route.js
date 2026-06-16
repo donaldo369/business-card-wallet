@@ -2,10 +2,16 @@ import { NextResponse } from 'next/server';
 
 export async function POST(req) {
   try {
-    const hubspotToken = process.env.HUBSPOT_ACCESS_TOKEN || req.headers.get('x-hubspot-token');
+    let hubspotToken = process.env.HUBSPOT_ACCESS_TOKEN || req.headers.get('x-hubspot-token');
+    
+    // "undefined" 또는 "null" 문자열이 들어오는 경우 예외 처리
+    if (hubspotToken === 'undefined' || hubspotToken === 'null') {
+      hubspotToken = null;
+    }
+
     if (!hubspotToken) {
       return NextResponse.json(
-        { error: 'HubSpot Access Token이 구성되지 않았습니다. 설정에서 토큰을 입력하거나 서버 환경 변수를 설정해주세요.' },
+        { error: 'HubSpot Access Token이 구성되지 않았습니다. Vercel 환경 변수 혹은 설정창에서 올바른 토큰을 입력해 주세요.' },
         { status: 400 }
       );
     }
