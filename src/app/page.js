@@ -390,18 +390,30 @@ export default function Home() {
 
         {/* 촬영 및 스캔 가이드 */}
         {showCapture && (
-          <div className="scanner-container">
-            <div className="scanner-header">
-              <h2>
-                <Smartphone size={16} className="color-violet" />
-                실시간 카메라 스캔
-              </h2>
-              <button onClick={() => setShowCapture(false)} className="scanner-close-btn">
-                닫기
-              </button>
-            </div>
-            <CameraCapture onImageSelected={(src) => setSelectedImage(src)} />
-          </div>
+          <CameraCapture 
+            onImageSelected={async (src) => {
+              setShowCapture(false);
+              await extractCardInfo(src);
+            }} 
+            onClose={() => setShowCapture(false)}
+            onManualInput={() => {
+              setShowCapture(false);
+              setEditingCard({
+                id: null,
+                name: '',
+                first_name: '',
+                last_name: '',
+                company: '',
+                email: '',
+                department: '',
+                title: '',
+                office_phone: '',
+                mobile_phone: '',
+                address: '',
+                image_url: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="%231e293b"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%2364748b" font-family="sans-serif" font-size="12">수동 입력</text></svg>'
+              });
+            }}
+          />
         )}
 
         {/* OCR 데이터 파싱 중 로딩 상태 */}
