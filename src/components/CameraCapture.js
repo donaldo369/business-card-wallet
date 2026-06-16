@@ -100,8 +100,8 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
         canvas.height = video.clientHeight;
       }
 
-      // 연산 속도를 위해 소형 해상도로 프레임 복사
-      const scale = 0.2;
+      // 빠른 연산을 위해 해상도 대폭 축소
+      const scale = 0.15;
       procCanvas.width = vW * scale;
       procCanvas.height = vH * scale;
       
@@ -109,8 +109,8 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
         procCtx.drawImage(video, 0, 0, procCanvas.width, procCanvas.height);
         const imgData = procCtx.getImageData(0, 0, procCanvas.width, procCanvas.height);
         
-        // 고성능 로컬 그래디언트(엣지) 감지 알고리즘 적용
-        const box = detectEdgesSobel(imgData, procCanvas.width, procCanvas.height);
+        // 고성능 대비 영역 바운딩 박스 감지 적용 (회전/기울임 대응)
+        const box = detectContrastBoundingBox(imgData, procCanvas.width, procCanvas.height);
 
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -134,11 +134,11 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
           });
 
           // 주황색 반투명 오버레이 박스 렌더링
-          ctx.fillStyle = 'rgba(255, 122, 89, 0.22)';
+          ctx.fillStyle = 'rgba(255, 122, 89, 0.24)';
           ctx.strokeStyle = '#ff7a59';
-          ctx.lineWidth = 3;
+          ctx.lineWidth = 3.5;
           
-          const r = 12;
+          const r = 14;
           ctx.beginPath();
           ctx.moveTo(screenBox.x + r, screenBox.y);
           ctx.lineTo(screenBox.x + screenBox.w - r, screenBox.y);
@@ -156,102 +156,76 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
           setDetectedBox(null);
         }
       } catch (e) {
-        // 백그라운드 프레임 획득 에러시 무시
+        // 에러 무시
       }
-    }, 150); // 약 0.15초마다 감지 루프
+    }, 120); // 프레임 속도 개선 (초당 8회 감지)
   };
 
-  // 로컬 미분 필터(Sobel/Gradient) 기반 명함 사각형 윤곽 검출 알고리즘
-  const detectEdgesSobel = (imgData, width, height) => {
+  // 대비 영역 감지 알고리즘 (기울임/각도에 무관하게 주황 박스를 기민하게 띄워줌)
+  const detectContrastBoundingBox = (imgData, width, height) => {
     const data = imgData.data;
     
-    // 1. 그레이스케일(Grayscale) 변환 및 노이즈 제거용 엣지 맵 생성
-    const gray = new Uint8Array(width * height);
-    for (let i = 0; i < width * height; i++) {
-      const r = data[i * 4];
-      const g = data[i * 4 + 1];
-      const b = data[i * 4 + 2];
-      gray[i] = 0.299 * r + 0.587 * g + 0.114 * b; // 표준 그레이 밝기 변환
-    }
+    const getPixel = (x, y) => {
+      const idx = (y * width + x) * 4;
+      return { r: data[idx], g: data[idx+1], b: data[idx+2] };
+    };
 
-    // 2. 인접 픽셀간 밝기 변화량(경사도) 계산
-    const edge = new Uint8Array(width * height);
-    const gradThreshold = 18; // 엣지로 분류할 최소 임계치
+    // 네 모퉁이 배경 샘플링
+    const cornerSamples = [
+      getPixel(2, 2), getPixel(width - 3, 2),
+      getPixel(2, height - 3), getPixel(width - 3, height - 3),
+      getPixel(Math.floor(width / 2), 2), getPixel(Math.floor(width / 2), height - 3)
+    ];
+
+    const avgBg = {
+      r: cornerSamples.reduce((acc, c) => acc + c.r, 0) / cornerSamples.length,
+      g: cornerSamples.reduce((acc, c) => acc + c.g, 0) / cornerSamples.length,
+      b: cornerSamples.reduce((acc, c) => acc + c.b, 0) / cornerSamples.length,
+    };
+
+    const colorDist = (c1, c2) => {
+      return Math.sqrt(Math.pow(c1.r - c2.r, 2) + Math.pow(c1.g - c2.g, 2) + Math.pow(c1.b - c2.b, 2));
+    };
+
+    // 가장자리 5% 노이즈 배제 영역
+    const marginX = Math.floor(width * 0.05);
+    const marginY = Math.floor(height * 0.05);
     
-    for (let y = 1; y < height - 1; y++) {
-      for (let x = 1; x < width - 1; x++) {
-        const idx = y * width + x;
+    let minX = width, maxX = 0, minY = height, maxY = 0;
+    let foregroundPixels = 0;
+    const threshold = 28; // 유연한 감지를 위해 감도 완화
+
+    for (let y = marginY; y < height - marginY; y++) {
+      for (let x = marginX; x < width - marginX; x++) {
+        const pixel = getPixel(x, y);
         
-        // 단순 차분 필터 (수평 & 수직 변화량 합산)
-        const dx = gray[idx + 1] - gray[idx - 1];
-        const dy = gray[(y + 1) * width + x] - gray[(y - 1) * width + x];
-        const magnitude = Math.sqrt(dx * dx + dy * dy);
-        
-        edge[idx] = magnitude > gradThreshold ? 255 : 0;
+        // 배경과 다른 색상이거나, 아주 밝은색(일반 흰색 명함 특성 반영)인 경우 명함 영역으로 판단
+        const isContrast = colorDist(pixel, avgBg) > threshold;
+        const isBright = (pixel.r + pixel.g + pixel.b) / 3 > 165; // 명함 흰색 필터링 추가
+
+        if (isContrast || isBright) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+          foregroundPixels++;
+        }
       }
     }
 
-    // 3. 외곽에서 안쪽으로 탐색하며 엣지 누적 밀도가 상승하는 선(Line) 검출
-    let top = 0, bottom = height - 1, left = 0, right = width - 1;
-    const lineRatioThreshold = 0.08; // 해당 라인의 엣지 비율 조건 (최소 8% 이상 엣지 존재)
+    const w = maxX - minX;
+    const h = maxY - minY;
+    const totalArea = (width - 2 * marginX) * (height - 2 * marginY);
+    const density = foregroundPixels / totalArea;
 
-    // Top 탐색
-    for (let y = 4; y < height * 0.5; y++) {
-      let edgeCount = 0;
-      for (let x = 0; x < width; x++) {
-        if (edge[y * width + x] > 0) edgeCount++;
-      }
-      if (edgeCount > width * lineRatioThreshold) {
-        top = y;
-        break;
-      }
-    }
-
-    // Bottom 탐색
-    for (let y = height - 5; y > height * 0.5; y--) {
-      let edgeCount = 0;
-      for (let x = 0; x < width; x++) {
-        if (edge[y * width + x] > 0) edgeCount++;
-      }
-      if (edgeCount > width * lineRatioThreshold) {
-        bottom = y;
-        break;
-      }
-    }
-
-    // Left 탐색
-    for (let x = 4; x < width * 0.5; x++) {
-      let edgeCount = 0;
-      for (let y = 0; y < height; y++) {
-        if (edge[y * width + x] > 0) edgeCount++;
-      }
-      if (edgeCount > height * lineRatioThreshold) {
-        left = x;
-        break;
-      }
-    }
-
-    // Right 탐색
-    for (let x = width - 5; x > width * 0.5; x--) {
-      let edgeCount = 0;
-      for (let y = 0; y < height; y++) {
-        if (edge[y * width + x] > 0) edgeCount++;
-      }
-      if (edgeCount > height * lineRatioThreshold) {
-        right = x;
-        break;
-      }
-    }
-
-    const w = right - left;
-    const h = bottom - top;
-
-    // 감지 영역이 너무 크거나(전체 화면 오검출) 너무 작은 경우 제외하는 안전 검사 추가
-    if (w > width * 0.25 && w < width * 0.94 && h > height * 0.25 && h < height * 0.94) {
-      // 명함의 표준 가로세로 비율(약 1.4 ~ 1.8 사이) 체크하여 오검출 방지
-      const ratio = w / h;
-      if (ratio > 1.2 && ratio < 2.0) {
-        return { x: left, y: top, w, h };
+    // 감지 영역이 전체 연산 영역의 12% ~ 80% 사이를 차지할 때 안정적인 명함으로 판단
+    if (w > width * 0.28 && w < width * 0.95 && h > height * 0.25 && h < height * 0.95) {
+      if (density > 0.10 && density < 0.82) {
+        const ratio = w / h;
+        // 명함 가로세로 비율 오차범위를 여유있게 조정 (기울어짐 대응)
+        if (ratio > 1.0 && ratio < 2.3) {
+          return { x: minX, y: minY, w, h };
+        }
       }
     }
     return null;
@@ -277,7 +251,6 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
         0, 0, canvas.width, canvas.height
       );
     } else {
-      // 감지 실패 시, 중앙 영역 자동 자르기
       const targetW = vW * 0.8;
       const targetH = targetW / 1.586;
       const startX = (vW - targetW) / 2;
@@ -309,7 +282,6 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             
-            // 사진첩 이미지도 동일한 에지 검출 헬퍼 적용
             const box = analyzeFrameImage(img);
             if (box) {
               canvas.width = box.w;
@@ -335,12 +307,12 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
   const analyzeFrameImage = (imgElement) => {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
-    const scale = 0.2;
+    const scale = 0.15;
     canvas.width = imgElement.naturalWidth * scale;
     canvas.height = imgElement.naturalHeight * scale;
     ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
     const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const box = detectEdgesSobel(imgData, canvas.width, canvas.height);
+    const box = detectContrastBoundingBox(imgData, canvas.width, canvas.height);
     if (box) {
       return {
         x: box.x / scale,
