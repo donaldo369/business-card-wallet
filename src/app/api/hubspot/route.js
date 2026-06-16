@@ -16,6 +16,9 @@ export async function POST(req) {
       );
     }
 
+    // 보안을 위해 앞 10자리와 길이만 로그에 기록하여 올바른 토큰 타입(pat-로 시작)인지 확인
+    console.log(`[HubSpot Sync] Token check - Length: ${hubspotToken.length}, Starts with: "${hubspotToken.substring(0, 10)}..."`);
+
     const { name, first_name, last_name, company, email, title, office_phone, mobile_phone, address } = await req.json();
 
     // 1. 이미 분리된 성과 이름이 있다면 그것을 사용하고, 없으면 기존대로 전체 이름 분리 시도
