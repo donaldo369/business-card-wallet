@@ -480,9 +480,9 @@ export default function Home() {
             </div>
 
             <form onSubmit={handleSaveCard} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              <div className="form-card-row" style={{ display: 'flex', gap: '28px', flexDirection: 'row' }}>
+              <div className="form-card-row">
                 {/* 왼쪽 크롭된 이미지 썸네일 */}
-                <div style={{ width: '220px', display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+                <div className="form-image-container">
                   <div className="biz-card-sim" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '8px', background: '#000' }}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img 
