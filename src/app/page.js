@@ -692,9 +692,18 @@ export default function Home() {
                 onClick={handleSaveBatchAll}
                 disabled={loading}
                 className="btn btn-primary"
-                style={{ width: '100%', justifyContent: 'center', gap: '8px' }}
+                style={{ 
+                  width: '100%', 
+                  justifyContent: 'center', 
+                  gap: '10px',
+                  padding: '18px 24px',
+                  fontSize: '17px',
+                  fontWeight: 700,
+                  borderRadius: '16px',
+                  marginTop: '4px'
+                }}
               >
-                <Save size={16} />
+                <Save size={22} />
                 {loading ? '저장 중...' : `${batchResults.filter(c => c._status === 'success').length}장 전체 저장`}
               </button>
             )}
