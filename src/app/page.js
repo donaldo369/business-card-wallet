@@ -27,6 +27,11 @@ export default function Home() {
   const [editingCard, setEditingCard] = useState(null);
   const [viewingCard, setViewingCard] = useState(null);
 
+  // 배치 스캔 상태
+  const [batchProcessing, setBatchProcessing] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
+  const [batchResults, setBatchResults] = useState([]); // 배치 처리 결과 목록
+
   const [settings, setSettings] = useState({
     supabaseUrl: '',
     supabaseAnonKey: '',
@@ -47,18 +52,34 @@ export default function Home() {
   };
 
   const handleDesktopFileChange = (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    if (files.length === 1) {
+      // 단일 파일: 기존 플로우 (크롭 → OCR)
       const reader = new FileReader();
       reader.onload = (event) => {
         if (event.target?.result) {
           setSelectedImage(event.target.result);
         }
       };
-      reader.readAsDataURL(file);
-      // 같은 파일을 연속으로 선택할 수 있도록 벨류 리셋
-      e.target.value = '';
+      reader.readAsDataURL(files[0]);
+    } else {
+      // 복수 파일: 배치 처리
+      const readPromises = files.map(file => new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (event) => resolve(event.target?.result);
+        reader.readAsDataURL(file);
+      }));
+
+      Promise.all(readPromises).then((dataUrls) => {
+        const validUrls = dataUrls.filter(Boolean);
+        if (validUrls.length > 0) {
+          handleBatchProcess(validUrls);
+        }
+      });
     }
+    e.target.value = '';
   };
 
   useEffect(() => {
@@ -201,6 +222,120 @@ export default function Home() {
     } finally {
       setIsExtracting(false);
     }
+  };
+
+  // 배치 스캔: 여러 장의 이미지를 순차적으로 OCR 처리
+  const handleBatchProcess = async (images) => {
+    setShowCapture(false);
+    setBatchProcessing(true);
+    setBatchProgress({ current: 0, total: images.length });
+    setBatchResults([]);
+
+    const results = [];
+    for (let i = 0; i < images.length; i++) {
+      setBatchProgress({ current: i + 1, total: images.length });
+      try {
+        const res = await fetch(images[i]);
+        const blob = await res.blob();
+        const file = new File([blob], `card_${i}.jpg`, { type: 'image/jpeg' });
+
+        const formData = new FormData();
+        formData.append('image', file);
+
+        const headers = {};
+        if (settings.geminiKey) {
+          headers['x-gemini-key'] = settings.geminiKey;
+        }
+
+        const ocrRes = await fetch('/api/extract', {
+          method: 'POST',
+          headers,
+          body: formData,
+        });
+
+        const result = await ocrRes.json();
+        if (!ocrRes.ok) throw new Error(result.error || 'OCR 실패');
+
+        results.push({
+          ...result.data,
+          id: null,
+          image_url: images[i],
+          _status: 'success'
+        });
+      } catch (err) {
+        console.error(`이미지 ${i + 1} 처리 실패:`, err);
+        results.push({
+          name: `인식 실패 (${i + 1}번째)`,
+          first_name: '', last_name: '', company: '', email: '',
+          department: '', title: '', office_phone: '', mobile_phone: '', address: '',
+          id: null,
+          image_url: images[i],
+          _status: 'error',
+          _error: err.message
+        });
+      }
+    }
+
+    setBatchResults(results);
+    setBatchProcessing(false);
+  };
+
+  // 배치 결과에서 개별 카드 편집 선택
+  const handleSelectBatchResult = (index) => {
+    const card = { ...batchResults[index] };
+    delete card._status;
+    delete card._error;
+    setEditingCard(card);
+  };
+
+  // 배치 결과 전체 자동 저장
+  const handleSaveBatchAll = async () => {
+    const sb = getSupabaseClient();
+    if (!sb) {
+      alert('Supabase 연결 설정이 필요합니다.');
+      return;
+    }
+
+    const successCards = batchResults.filter(c => c._status === 'success');
+    if (successCards.length === 0) {
+      alert('저장할 수 있는 명함이 없습니다.');
+      return;
+    }
+
+    setLoading(true);
+    let savedCount = 0;
+    for (const card of successCards) {
+      try {
+        let finalImageUrl = card.image_url;
+        if (card.image_url.startsWith('data:')) {
+          finalImageUrl = await uploadImageToSupabase(card.image_url);
+        }
+
+        const cardData = {
+          name: card.name,
+          first_name: card.first_name,
+          last_name: card.last_name,
+          company: card.company,
+          email: card.email,
+          department: card.department,
+          title: card.title,
+          office_phone: card.office_phone,
+          mobile_phone: card.mobile_phone,
+          address: card.address,
+          image_url: finalImageUrl,
+        };
+
+        const { error } = await sb.from('business_cards').insert([cardData]);
+        if (!error) savedCount++;
+      } catch (err) {
+        console.error('배치 저장 실패:', err);
+      }
+    }
+
+    alert(`${savedCount}/${successCards.length}장의 명함이 저장되었습니다.`);
+    setBatchResults([]);
+    loadCards();
+    setLoading(false);
   };
 
   const handleCropComplete = async (croppedImg) => {
@@ -416,6 +551,7 @@ export default function Home() {
             ref={fileInputRef}
             onChange={handleDesktopFileChange}
             accept="image/*"
+            multiple
             style={{ display: 'none' }}
           />
         </div>
@@ -426,7 +562,8 @@ export default function Home() {
             onImageSelected={async (src) => {
               setShowCapture(false);
               await extractCardInfo(src);
-            }} 
+            }}
+            onBatchSelected={handleBatchProcess}
             onClose={() => setShowCapture(false)}
             onManualInput={() => {
               setShowCapture(false);
@@ -448,7 +585,7 @@ export default function Home() {
           />
         )}
 
-        {/* OCR 데이터 파싱 중 로딩 상태 */}
+        {/* OCR 데이터 파싱 중 로딩 상태 (단일) */}
         {isExtracting && (
           <div className="loading-overlay">
             <div className="spinner-relative">
@@ -457,6 +594,110 @@ export default function Home() {
             </div>
             <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#fff', marginBottom: '4px' }}>인공지능 정보 분석 중</h3>
             <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>명함 이미지로부터 이름, 연락처 등을 식별하고 있습니다...</p>
+          </div>
+        )}
+
+        {/* 배치 처리 진행 중 오버레이 */}
+        {batchProcessing && (
+          <div className="loading-overlay">
+            <div className="spinner-relative">
+              <div className="spinner"></div>
+              <Sparkles size={24} className="spinner-icon" />
+            </div>
+            <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#fff', marginBottom: '4px' }}>
+              일괄 분석 중 ({batchProgress.current}/{batchProgress.total})
+            </h3>
+            <div style={{ width: '200px', height: '6px', background: 'rgba(255,255,255,0.15)', borderRadius: '3px', marginTop: '12px', overflow: 'hidden' }}>
+              <div style={{
+                width: `${(batchProgress.current / batchProgress.total) * 100}%`,
+                height: '100%',
+                background: 'linear-gradient(90deg, #6366f1, #a855f7)',
+                borderRadius: '3px',
+                transition: 'width 0.3s ease'
+              }} />
+            </div>
+            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '8px' }}>
+              {batchProgress.current}번째 명함을 분석하고 있습니다...
+            </p>
+          </div>
+        )}
+
+        {/* 배치 처리 결과 목록 */}
+        {batchResults.length > 0 && !editingCard && (
+          <div className="glass" style={{ padding: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 className="section-title">
+                <Sparkles size={18} className="color-violet" />
+                일괄 스캔 결과 ({batchResults.filter(c => c._status === 'success').length}/{batchResults.length}장 인식)
+              </h3>
+              <button
+                onClick={() => setBatchResults([])}
+                style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+              {batchResults.map((card, idx) => (
+                <div
+                  key={idx}
+                  onClick={() => card._status === 'success' && handleSelectBatchResult(idx)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    padding: '12px',
+                    background: card._status === 'success' ? 'rgba(99,102,241,0.1)' : 'rgba(239,68,68,0.1)',
+                    borderRadius: '12px',
+                    cursor: card._status === 'success' ? 'pointer' : 'default',
+                    border: `1px solid ${card._status === 'success' ? 'rgba(99,102,241,0.25)' : 'rgba(239,68,68,0.25)'}`,
+                    transition: 'transform 0.15s, box-shadow 0.15s'
+                  }}
+                  onMouseEnter={(e) => card._status === 'success' && (e.currentTarget.style.transform = 'translateY(-1px)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.transform = 'translateY(0)')}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={card.image_url}
+                    alt={card.name || '명함'}
+                    style={{
+                      width: '64px',
+                      height: '40px',
+                      objectFit: 'cover',
+                      borderRadius: '8px',
+                      border: '1px solid rgba(255,255,255,0.1)'
+                    }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {card.name || `카드 ${idx + 1}`}
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                      {card._status === 'success'
+                        ? `${card.company || ''}${card.title ? ' · ' + card.title : ''}`
+                        : `❌ ${card._error || '인식 실패'}`
+                      }
+                    </div>
+                  </div>
+                  {card._status === 'success' && (
+                    <div style={{ fontSize: '11px', color: '#6366f1', fontWeight: 600, flexShrink: 0 }}>편집 →</div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {batchResults.filter(c => c._status === 'success').length > 0 && (
+              <button
+                onClick={handleSaveBatchAll}
+                disabled={loading}
+                className="btn btn-primary"
+                style={{ width: '100%', justifyContent: 'center', gap: '8px' }}
+              >
+                <Save size={16} />
+                {loading ? '저장 중...' : `${batchResults.filter(c => c._status === 'success').length}장 전체 저장`}
+              </button>
+            )}
           </div>
         )}
 

@@ -3,7 +3,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Image as ImageIcon, MoreHorizontal, X, Zap, ZapOff } from 'lucide-react';
 
-export default function CameraCapture({ onImageSelected, onClose, onManualInput }) {
+export default function CameraCapture({ onImageSelected, onBatchSelected, onClose, onManualInput }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null); // 실시간 오버레이 캔버스
   const fileInputRef = useRef(null);
@@ -361,6 +361,8 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
     return null;
   };
 
+  const [capturedImages, setCapturedImages] = useState([]); // 배치 촬영 모드
+
   const handleCapture = () => {
     const video = videoRef.current;
     if (!video) return;
@@ -397,8 +399,21 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
     }
 
     const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-    onImageSelected(dataUrl);
+    setCapturedImages(prev => [...prev, dataUrl]);
+  };
+
+  const handleBatchDone = () => {
+    if (capturedImages.length === 0) return;
     stopCamera();
+    if (capturedImages.length === 1) {
+      onImageSelected(capturedImages[0]);
+    } else {
+      onBatchSelected(capturedImages);
+    }
+  };
+
+  const handleRemoveCaptured = (index) => {
+    setCapturedImages(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleFileChange = (e) => {
@@ -566,6 +581,77 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
           </>
         )}
       </div>
+
+      {/* 촬영된 이미지 썸네일 스트립 (배치 모드) */}
+      {capturedImages.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '10px 16px',
+            background: 'rgba(0,0,0,0.9)',
+            overflowX: 'auto',
+            zIndex: 110
+          }}
+        >
+          {capturedImages.map((img, idx) => (
+            <div key={idx} style={{ position: 'relative', flexShrink: 0 }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={img}
+                alt={`촬영 ${idx + 1}`}
+                style={{
+                  width: '56px',
+                  height: '36px',
+                  objectFit: 'cover',
+                  borderRadius: '6px',
+                  border: '2px solid rgba(255,255,255,0.3)'
+                }}
+              />
+              <button
+                onClick={() => handleRemoveCaptured(idx)}
+                style={{
+                  position: 'absolute',
+                  top: '-6px',
+                  right: '-6px',
+                  width: '18px',
+                  height: '18px',
+                  borderRadius: '50%',
+                  background: '#ef4444',
+                  border: 'none',
+                  color: 'white',
+                  fontSize: '10px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  lineHeight: 1
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          <button
+            onClick={handleBatchDone}
+            style={{
+              flexShrink: 0,
+              padding: '8px 18px',
+              background: '#6366f1',
+              border: 'none',
+              borderRadius: '20px',
+              color: 'white',
+              fontSize: '13px',
+              fontWeight: '700',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            완료 ({capturedImages.length}장)
+          </button>
+        </div>
+      )}
 
       {/* 하단 제어 바 (사진첩, 셔터, 다른수단 구조) */}
       <div 
