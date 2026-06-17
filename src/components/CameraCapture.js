@@ -81,6 +81,7 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
 
   // 이전 프레임의 감지 결과를 저장하여 떨림 방지 (temporal smoothing)
   const prevBoxRef = useRef(null);
+  const [debugInfo, setDebugInfo] = useState('');
 
   // 실시간 명함 영역 경계선 감지 루프
   const startLiveDetection = () => {
@@ -117,8 +118,8 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
       ctx.setLineDash([]);
     };
 
-    // 감지 안 된 연속 프레임 카운터 (떨림 방지)
     let missCount = 0;
+    let frameCount = 0;
 
     detectIntervalRef.current = setInterval(() => {
       if (video.paused || video.ended || video.readyState < 2) return;
@@ -132,28 +133,30 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
         canvas.height = video.clientHeight;
       }
 
-      // 해상도 축소 (0.2 = 기존 0.15보다 더 세밀하게 분석)
-      const scale = 0.2;
-      procCanvas.width = Math.round(vW * scale);
-      procCanvas.height = Math.round(vH * scale);
+      // 해상도: 0.25 (기존 0.15~0.2보다 더 높은 해상도로 더 정확하게)
+      const scale = 0.25;
+      const pw = Math.round(vW * scale);
+      const ph = Math.round(vH * scale);
+      procCanvas.width = pw;
+      procCanvas.height = ph;
       
       try {
-        procCtx.drawImage(video, 0, 0, procCanvas.width, procCanvas.height);
-        const imgData = procCtx.getImageData(0, 0, procCanvas.width, procCanvas.height);
+        procCtx.drawImage(video, 0, 0, pw, ph);
+        const imgData = procCtx.getImageData(0, 0, pw, ph);
         
-        let rawBox = detectCardBox(imgData, procCanvas.width, procCanvas.height);
+        const rawBox = detectCardBox(imgData, pw, ph);
 
-        // temporal smoothing: 현재 결과를 이전 결과와 부드럽게 보간
+        // temporal smoothing
         let smoothedBox = null;
         if (rawBox) {
           missCount = 0;
           if (prevBoxRef.current) {
-            const alpha = 0.45; // 0=이전 프레임만, 1=현재 프레임만
+            const a = 0.5;
             smoothedBox = {
-              x: prevBoxRef.current.x * (1 - alpha) + rawBox.x * alpha,
-              y: prevBoxRef.current.y * (1 - alpha) + rawBox.y * alpha,
-              w: prevBoxRef.current.w * (1 - alpha) + rawBox.w * alpha,
-              h: prevBoxRef.current.h * (1 - alpha) + rawBox.h * alpha,
+              x: prevBoxRef.current.x * (1 - a) + rawBox.x * a,
+              y: prevBoxRef.current.y * (1 - a) + rawBox.y * a,
+              w: prevBoxRef.current.w * (1 - a) + rawBox.w * a,
+              h: prevBoxRef.current.h * (1 - a) + rawBox.h * a,
             };
           } else {
             smoothedBox = rawBox;
@@ -161,8 +164,7 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
           prevBoxRef.current = smoothedBox;
         } else {
           missCount++;
-          // 3프레임 연속 미감지 시에만 박스를 숨김 (깜빡임 방지)
-          if (missCount < 3 && prevBoxRef.current) {
+          if (missCount < 4 && prevBoxRef.current) {
             smoothedBox = prevBoxRef.current;
           } else {
             prevBoxRef.current = null;
@@ -192,18 +194,14 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
             h: origH * s
           };
 
-          setDetectedBox({
-            x: origX,
-            y: origY,
-            w: origW,
-            h: origH
-          });
+          setDetectedBox({ x: origX, y: origY, w: origW, h: origH });
 
-          ctx.fillStyle = 'rgba(255, 122, 89, 0.20)';
+          // 굵은 주황색 실선 + 반투명 면
+          ctx.fillStyle = 'rgba(255, 122, 89, 0.18)';
           ctx.strokeStyle = '#ff7a59';
           ctx.lineWidth = 4;
           
-          const r = 14;
+          const r = 12;
           ctx.beginPath();
           ctx.moveTo(screenBox.x + r, screenBox.y);
           ctx.lineTo(screenBox.x + screenBox.w - r, screenBox.y);
@@ -217,100 +215,135 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
           ctx.closePath();
           ctx.fill();
           ctx.stroke();
+
+          // 네 모서리에 L자 코너 마크 추가 (감지 확인용)
+          const cornerLen = Math.min(screenBox.w, screenBox.h) * 0.15;
+          ctx.strokeStyle = '#00ff88';
+          ctx.lineWidth = 3;
+          ctx.setLineDash([]);
+          // 좌상
+          ctx.beginPath();
+          ctx.moveTo(screenBox.x, screenBox.y + cornerLen);
+          ctx.lineTo(screenBox.x, screenBox.y);
+          ctx.lineTo(screenBox.x + cornerLen, screenBox.y);
+          ctx.stroke();
+          // 우상
+          ctx.beginPath();
+          ctx.moveTo(screenBox.x + screenBox.w - cornerLen, screenBox.y);
+          ctx.lineTo(screenBox.x + screenBox.w, screenBox.y);
+          ctx.lineTo(screenBox.x + screenBox.w, screenBox.y + cornerLen);
+          ctx.stroke();
+          // 좌하
+          ctx.beginPath();
+          ctx.moveTo(screenBox.x, screenBox.y + screenBox.h - cornerLen);
+          ctx.lineTo(screenBox.x, screenBox.y + screenBox.h);
+          ctx.lineTo(screenBox.x + cornerLen, screenBox.y + screenBox.h);
+          ctx.stroke();
+          // 우하
+          ctx.beginPath();
+          ctx.moveTo(screenBox.x + screenBox.w - cornerLen, screenBox.y + screenBox.h);
+          ctx.lineTo(screenBox.x + screenBox.w, screenBox.y + screenBox.h);
+          ctx.lineTo(screenBox.x + screenBox.w, screenBox.y + screenBox.h - cornerLen);
+          ctx.stroke();
         } else {
           setDetectedBox(null);
           drawDefaultGuideBox(ctx, canvas.width, canvas.height);
         }
+
+        // 디버그 정보 (10프레임마다 갱신)
+        frameCount++;
+        if (frameCount % 10 === 0) {
+          setDebugInfo(rawBox 
+            ? `감지됨 [${pw}×${ph}] box(${Math.round(rawBox.x)},${Math.round(rawBox.y)},${Math.round(rawBox.w)}×${Math.round(rawBox.h)})` 
+            : `탐색중... [${pw}×${ph}] v=${vW}×${vH}`
+          );
+        }
       } catch (e) {
-        // 에러 무시
+        setDebugInfo(`에러: ${e.message}`);
       }
-    }, 100); // 초당 10회
+    }, 100);
   };
 
-  // ========== 핵심 감지 엔진 ==========
-  // 전략 A: 행/열 밝기 투영 (배경과 명함의 밝기 차이를 행/열 단위로 분석)
-  // 전략 B: Sobel 에지 감지 (에지 픽셀 분포로 바운딩 박스 추정)
-  // 두 전략 중 하나라도 성공하면 결과 반환 (A 우선)
+  // ========== 핵심 감지 엔진 (RGB 색상 거리 기반) ==========
   const detectCardBox = (imgData, width, height) => {
     const data = imgData.data;
-    const total = width * height;
+
+    // 1. 화면 테두리 픽셀들의 평균 RGB를 배경색으로 사용
+    let bgR = 0, bgG = 0, bgB = 0, bgCount = 0;
     
-    // 1. 그레이스케일 변환
-    const grays = new Uint8Array(total);
-    for (let i = 0; i < total; i++) {
-      const idx = i * 4;
-      grays[i] = Math.round(data[idx] * 0.299 + data[idx+1] * 0.587 + data[idx+2] * 0.114);
+    const sampleBorder = (x, y) => {
+      const idx = (y * width + x) * 4;
+      bgR += data[idx]; bgG += data[idx+1]; bgB += data[idx+2]; bgCount++;
+    };
+    
+    // 상단 4줄, 하단 4줄, 좌측 4열, 우측 4열에서 샘플링
+    for (let y = 0; y < 4; y++) {
+      for (let x = 0; x < width; x++) sampleBorder(x, y);
     }
-
-    // ===== 전략 A: 행/열 밝기 투영 =====
-    const resultA = detectByProjection(grays, width, height);
-    if (resultA) return resultA;
-
-    // ===== 전략 B: 에지 감지 (Fallback) =====
-    const resultB = detectByEdge(grays, width, height);
-    return resultB;
-  };
-
-  // 전략 A: 행/열 밝기 투영 분석
-  const detectByProjection = (grays, width, height) => {
-    // 화면 테두리 3px 줄의 평균 밝기를 배경 기준값으로 사용
-    let borderSum = 0, borderCount = 0;
-    for (let y = 0; y < 3; y++) {
-      for (let x = 0; x < width; x++) { borderSum += grays[y * width + x]; borderCount++; }
+    for (let y = height - 4; y < height; y++) {
+      for (let x = 0; x < width; x++) sampleBorder(x, y);
     }
-    for (let y = height - 3; y < height; y++) {
-      for (let x = 0; x < width; x++) { borderSum += grays[y * width + x]; borderCount++; }
+    for (let y = 4; y < height - 4; y++) {
+      for (let x = 0; x < 4; x++) sampleBorder(x, y);
+      for (let x = width - 4; x < width; x++) sampleBorder(x, y);
     }
-    for (let y = 3; y < height - 3; y++) {
-      for (let x = 0; x < 3; x++) { borderSum += grays[y * width + x]; borderCount++; }
-      for (let x = width - 3; x < width; x++) { borderSum += grays[y * width + x]; borderCount++; }
-    }
-    const bgAvg = borderSum / borderCount;
+    
+    bgR /= bgCount; bgG /= bgCount; bgB /= bgCount;
 
-    // 각 행의 평균 밝기가 배경과 얼마나 다른지 계산
+    // 2. 각 행의 배경과의 평균 RGB 색상 거리 계산
     const rowDiff = new Float32Array(height);
     for (let y = 0; y < height; y++) {
       let sum = 0;
       for (let x = 0; x < width; x++) {
-        sum += Math.abs(grays[y * width + x] - bgAvg);
+        const idx = (y * width + x) * 4;
+        const dr = data[idx] - bgR;
+        const dg = data[idx+1] - bgG;
+        const db = data[idx+2] - bgB;
+        sum += Math.sqrt(dr * dr + dg * dg + db * db);
       }
       rowDiff[y] = sum / width;
     }
 
-    // 각 열의 평균 밝기가 배경과 얼마나 다른지 계산
+    // 3. 각 열의 배경과의 평균 RGB 색상 거리 계산
     const colDiff = new Float32Array(width);
     for (let x = 0; x < width; x++) {
       let sum = 0;
       for (let y = 0; y < height; y++) {
-        sum += Math.abs(grays[y * width + x] - bgAvg);
+        const idx = (y * width + x) * 4;
+        const dr = data[idx] - bgR;
+        const dg = data[idx+1] - bgG;
+        const db = data[idx+2] - bgB;
+        sum += Math.sqrt(dr * dr + dg * dg + db * db);
       }
       colDiff[x] = sum / height;
     }
 
-    // 차이값의 중앙값을 계산하여 동적 임계치 결정
-    const sortedRowDiff = Array.from(rowDiff).sort((a, b) => a - b);
-    const sortedColDiff = Array.from(colDiff).sort((a, b) => a - b);
-    const rowMedian = sortedRowDiff[Math.floor(height * 0.5)];
-    const colMedian = sortedColDiff[Math.floor(width * 0.5)];
+    // 4. 동적 임계치: 25번째 백분위수 기준 (하위 25%보다 뚜렷이 높은 행/열만 선택)
+    const sortedRow = Array.from(rowDiff).sort((a, b) => a - b);
+    const sortedCol = Array.from(colDiff).sort((a, b) => a - b);
+    
+    const rowP25 = sortedRow[Math.floor(height * 0.25)];
+    const colP25 = sortedCol[Math.floor(width * 0.25)];
+    
+    // 임계치: 하위 25%값 + 전체 범위의 20% (아주 작은 차이도 잡아냄)
+    const rowRange = sortedRow[height - 1] - sortedRow[0];
+    const colRange = sortedCol[width - 1] - sortedCol[0];
+    
+    const rowThreshold = rowP25 + Math.max(rowRange * 0.20, 5);
+    const colThreshold = colP25 + Math.max(colRange * 0.20, 5);
 
-    // 임계치 = 중앙값의 1.3배 (배경과 뚜렷이 다른 행/열만 선택)
-    const rowThreshold = Math.max(rowMedian * 1.3, 8);
-    const colThreshold = Math.max(colMedian * 1.3, 8);
+    // 5. 경계 찾기
+    let top = -1, bottom = -1, left = -1, right = -1;
 
-    // 위에서부터 첫 번째 유의미한 행 찾기
-    let top = -1;
     for (let y = 2; y < height - 2; y++) {
       if (rowDiff[y] > rowThreshold) { top = y; break; }
     }
-    let bottom = -1;
     for (let y = height - 3; y >= 2; y--) {
       if (rowDiff[y] > rowThreshold) { bottom = y; break; }
     }
-    let left = -1;
     for (let x = 2; x < width - 2; x++) {
       if (colDiff[x] > colThreshold) { left = x; break; }
     }
-    let right = -1;
     for (let x = width - 3; x >= 2; x--) {
       if (colDiff[x] > colThreshold) { right = x; break; }
     }
@@ -321,58 +354,9 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
     const h = bottom - top;
     if (w <= 0 || h <= 0) return null;
 
-    if (w > width * 0.22 && w < width * 0.96 && h > height * 0.18 && h < height * 0.96) {
-      const ratio = w / h;
-      if (ratio > 0.35 && ratio < 2.8) {
-        return { x: left, y: top, w, h };
-      }
-    }
-    return null;
-  };
-
-  // 전략 B: Sobel 에지 감지 (Fallback)
-  const detectByEdge = (grays, width, height) => {
-    const marginX = Math.floor(width * 0.05);
-    const marginY = Math.floor(height * 0.05);
-    
-    const xs = [];
-    const ys = [];
-
-    for (let y = marginY; y < height - marginY; y++) {
-      for (let x = marginX; x < width - marginX; x++) {
-        const idx = y * width + x;
-        const gx = grays[idx + 1] - grays[idx - 1];
-        const gy = grays[idx + width] - grays[idx - width];
-        const g = Math.abs(gx) + Math.abs(gy);
-
-        if (g > 18) {
-          xs.push(x);
-          ys.push(y);
-        }
-      }
-    }
-
-    if (xs.length < 50) return null;
-
-    xs.sort((a, b) => a - b);
-    ys.sort((a, b) => a - b);
-
-    const discard = Math.floor(xs.length * 0.05);
-    const minX = xs[discard];
-    const maxX = xs[xs.length - 1 - discard];
-    const minY = ys[discard];
-    const maxY = ys[ys.length - 1 - discard];
-
-    const w = maxX - minX;
-    const h = maxY - minY;
-    
-    if (w <= 0 || h <= 0) return null;
-
-    if (w > width * 0.25 && w < width * 0.96 && h > height * 0.18 && h < height * 0.96) {
-      const ratio = w / h;
-      if (ratio > 0.35 && ratio < 2.8) {
-        return { x: minX, y: minY, w, h };
-      }
+    // 6. 최소 크기만 체크 (비율 제한 매우 관대)
+    if (w > width * 0.15 && h > height * 0.10) {
+      return { x: left, y: top, w, h };
     }
     return null;
   };
@@ -458,7 +442,7 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
     canvas.height = imgElement.naturalHeight * scale;
     ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
     const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const box = detectContrastBoundingBox(imgData, canvas.width, canvas.height);
+    const box = detectCardBox(imgData, canvas.width, canvas.height);
     if (box) {
       return {
         x: box.x / scale,
@@ -558,24 +542,26 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
               }}
             />
             
-            {/* 하단 텍스트 가이드 */}
+            {/* 감지 상태 표시 */}
             <div 
               style={{
                 position: 'absolute',
                 bottom: '24px',
                 left: '50%',
                 transform: 'translateX(-50%)',
-                color: 'white',
-                fontSize: '15px',
+                color: detectedBox ? '#00ff88' : 'rgba(255,255,255,0.7)',
+                fontSize: '11px',
                 fontWeight: '600',
-                background: 'rgba(0,0,0,0.6)',
-                padding: '6px 18px',
+                background: 'rgba(0,0,0,0.7)',
+                padding: '5px 14px',
                 borderRadius: '99px',
                 pointerEvents: 'none',
-                zIndex: 108
+                zIndex: 108,
+                fontFamily: 'monospace',
+                whiteSpace: 'nowrap'
               }}
             >
-              앞면
+              {debugInfo || '초기화 중...'}
             </div>
           </>
         )}
