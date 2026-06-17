@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Settings, Search, Plus, Check, Mail, Phone, MapPin, 
   Building2, ExternalLink, Trash2, Edit3, 
-  Save, X, FileText, Sparkles, AlertCircle, RefreshCw, Smartphone
+  Save, X, FileText, Sparkles, AlertCircle, RefreshCw, Smartphone, History, ChevronDown
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { getSupabaseClient } from '../lib/supabase';
@@ -33,7 +33,8 @@ export default function Home() {
   const [batchResults, setBatchResults] = useState([]);
 
   // 중복 감지 상태
-  const [duplicateInfo, setDuplicateInfo] = useState(null); // { existingCard, newCardData, newImageUrl }
+  const [duplicateInfo, setDuplicateInfo] = useState(null);
+  const [showHistory, setShowHistory] = useState(false); // 상세 모달에서 이력 펼치기
 
   const [settings, setSettings] = useState({
     supabaseUrl: '',
@@ -495,28 +496,23 @@ export default function Home() {
         }
 
         alert('명함이 성공적으로 저장되었습니다.');
-        setEditingCard(null);
-        setCroppedImage(null);
-        loadCards();
       } else {
-        // 새 카드 추가 모드 → 중복 검사
-        const existing = await findDuplicate(editingCard.name, editingCard.mobile_phone);
-        if (existing) {
-          // 중복 발견 → 확인 모달 표시
-          setDuplicateInfo({ existingCard: existing, newCardData: cardData });
-          setLoading(false);
-          return;
-        }
-
-        // 중복 없으면 바로 삽입
+        // 새 카드 → 항상 새 레코드로 삽입 (이력 보존)
         const { error } = await sb.from('business_cards').insert([cardData]);
         if (error) throw error;
 
-        alert('명함이 성공적으로 저장되었습니다.');
-        setEditingCard(null);
-        setCroppedImage(null);
-        loadCards();
+        // 중복 존재 여부 알림
+        const existing = await findDuplicate(cardData.name, cardData.mobile_phone);
+        if (existing) {
+          alert(`명함이 저장되었습니다.\n${cardData.name} 님의 이전 명함 이력이 함께 보관됩니다.`);
+        } else {
+          alert('명함이 성공적으로 저장되었습니다.');
+        }
       }
+
+      setEditingCard(null);
+      setCroppedImage(null);
+      loadCards();
     } catch (err) {
       console.error(err);
       alert(`저장 실패: ${err.message}`);
@@ -601,6 +597,47 @@ export default function Home() {
       (card.mobile_phone && card.mobile_phone.includes(searchLower))
     );
   });
+
+  // 날짜별 그룹핑
+  const groupedByDate = React.useMemo(() => {
+    const groups = {};
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(today.getTime() - 86400000);
+
+    filteredCards.forEach(card => {
+      const d = new Date(card.created_at);
+      const cardDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      
+      let label;
+      if (cardDate.getTime() === today.getTime()) {
+        label = '오늘';
+      } else if (cardDate.getTime() === yesterday.getTime()) {
+        label = '어제';
+      } else {
+        label = `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
+      }
+
+      if (!groups[label]) groups[label] = [];
+      groups[label].push(card);
+    });
+
+    return Object.entries(groups);
+  }, [filteredCards]);
+
+  // 특정 카드의 변경 이력 조회 (name + mobile_phone 동일)
+  const getCardHistory = (card) => {
+    if (!card || !card.name || !card.mobile_phone) return [];
+    const normalized = card.mobile_phone.replace(/[\s\-]/g, '');
+    return cards
+      .filter(c => 
+        c.id !== card.id && 
+        c.name === card.name && 
+        c.mobile_phone && 
+        c.mobile_phone.replace(/[\s\-]/g, '') === normalized
+      )
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  };
 
   return (
     <div className="app-container">
@@ -1098,47 +1135,57 @@ export default function Home() {
               <p>"새 명함 추가" 버튼을 눌러 첫 번째 명함을 카메라로 스캔하거나 이미지를 올려보세요.</p>
             </div>
           ) : (
-            <div className="cards-grid">
-              {filteredCards.map((card) => (
-                <div key={card.id} onClick={() => setViewingCard(card)} className="glass card-item">
-                  {/* 왼쪽 명함 썸네일 */}
-                  <div className="card-thumb">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={card.image_url} alt={card.name} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              {groupedByDate.map(([dateLabel, groupCards]) => (
+                <div key={dateLabel} className="date-group-section">
+                  <div className="date-group-header">
+                    <span className="date-group-title">{dateLabel}</span>
+                    <span className="date-group-count">{groupCards.length}개</span>
                   </div>
+                  <div className="cards-grid">
+                    {groupCards.map((card) => (
+                      <div key={card.id} onClick={() => setViewingCard(card)} className="glass card-item">
+                        {/* 왼쪽 명함 썸네일 */}
+                        <div className="card-thumb">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={card.image_url} alt={card.name} />
+                        </div>
 
-                  {/* 오른쪽 정보 */}
-                  <div className="card-info">
-                    <div>
-                      <div className="card-name-group">
-                        <h4 className="card-name">{card.name}</h4>
-                        <span className="card-title">{card.title}</span>
+                        {/* 오른쪽 정보 */}
+                        <div className="card-info">
+                          <div>
+                            <div className="card-name-group">
+                              <h4 className="card-name">{card.name}</h4>
+                              <span className="card-title">{card.title}</span>
+                            </div>
+                            <p className="card-company">{card.company}</p>
+                          </div>
+
+                          <div className="card-meta-list">
+                            {card.mobile_phone && (
+                              <p className="card-meta-item">
+                                <Phone size={11} />
+                                {card.mobile_phone}
+                              </p>
+                            )}
+                            {card.email && (
+                              <p className="card-meta-item">
+                                <Mail size={11} />
+                                {card.email}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* HubSpot 상태 배지 */}
+                        {card.hubspot_id && (
+                          <div className="hubspot-badge" title="HubSpot 동기화됨">
+                            <Check size={14} />
+                          </div>
+                        )}
                       </div>
-                      <p className="card-company">{card.company}</p>
-                    </div>
-
-                    <div className="card-meta-list">
-                      {card.mobile_phone && (
-                        <p className="card-meta-item">
-                          <Phone size={11} />
-                          {card.mobile_phone}
-                        </p>
-                      )}
-                      {card.email && (
-                        <p className="card-meta-item">
-                          <Mail size={11} />
-                          {card.email}
-                        </p>
-                      )}
-                    </div>
+                    ))}
                   </div>
-
-                  {/* HubSpot 상태 배지 */}
-                  {card.hubspot_id && (
-                    <div className="hubspot-badge" title="HubSpot 동기화됨">
-                      <Check size={14} />
-                    </div>
-                  )}
                 </div>
               ))}
             </div>
