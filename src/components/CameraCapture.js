@@ -200,65 +200,53 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
     }, 120); // 프레임 속도 개선 (초당 8회 감지)
   };
 
-  // 대비 영역 감지 알고리즘 (기울임/각도에 무관하게 주황 박스를 기민하게 띄워줌)
+  // 실시간 에지(경계선) 감지 알고리즘 (로컬 그래디언트 기반으로 조명/배경 무관하게 명함 테두리 추적)
   const detectContrastBoundingBox = (imgData, width, height) => {
     const data = imgData.data;
     
-    const getPixel = (x, y) => {
-      const idx = (y * width + x) * 4;
-      return { r: data[idx], g: data[idx+1], b: data[idx+2] };
-    };
+    // 1. 빠른 연산을 위해 그레이스케일(밝기) 버퍼 생성
+    const grays = new Uint8Array(width * height);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4;
+        // 인간 눈의 밝기 인지 비율 적용 (Luminance)
+        grays[y * width + x] = data[idx] * 0.299 + data[idx+1] * 0.587 + data[idx+2] * 0.114;
+      }
+    }
 
-    // 네 모퉁이 배경 샘플링
-    const cornerSamples = [
-      getPixel(2, 2), getPixel(width - 3, 2),
-      getPixel(2, height - 3), getPixel(width - 3, height - 3),
-      getPixel(Math.floor(width / 2), 2), getPixel(Math.floor(width / 2), height - 3)
-    ];
-
-    const avgBg = {
-      r: cornerSamples.reduce((acc, c) => acc + c.r, 0) / cornerSamples.length,
-      g: cornerSamples.reduce((acc, c) => acc + c.g, 0) / cornerSamples.length,
-      b: cornerSamples.reduce((acc, c) => acc + c.b, 0) / cornerSamples.length,
-    };
-
-    const colorDist = (c1, c2) => {
-      return Math.sqrt(Math.pow(c1.r - c2.r, 2) + Math.pow(c1.g - c2.g, 2) + Math.pow(c1.b - c2.b, 2));
-    };
-
-    // 가장자리 5% 노이즈 배제 영역
-    const marginX = Math.floor(width * 0.05);
-    const marginY = Math.floor(height * 0.05);
+    // 화면 가장자리 8% 영역은 노이즈(손가락, 배경잡음) 방지를 위해 제외
+    const marginX = Math.floor(width * 0.08);
+    const marginY = Math.floor(height * 0.08);
     
     const xs = [];
     const ys = [];
-    const threshold = 28; // 유연한 감지를 위해 감도 완화
+    const gradThreshold = 22; // 에지 감지 감도 (낮을수록 민감, 높을수록 뚜렷한 선만 감지)
 
-    const isBgBright = (avgBg.r + avgBg.g + avgBg.b) / 3 > 160;
-
+    // 2. 가로/세로 방향 로컬 그래디언트(경계 엣지) 계산
     for (let y = marginY; y < height - marginY; y++) {
       for (let x = marginX; x < width - marginX; x++) {
-        const pixel = getPixel(x, y);
+        const idx = y * width + x;
         
-        // 배경과 다른 색상이거나, 아주 밝은색(일반 흰색 명함 특성 반영)인 경우 명함 영역으로 판단
-        const isContrast = colorDist(pixel, avgBg) > threshold;
-        // 배경이 이미 밝은 경우(예: 흰 테이블/장판) 단순 밝기 필터링은 비활성화하여 오작동 방지
-        const isBright = !isBgBright && ((pixel.r + pixel.g + pixel.b) / 3 > 165);
+        // 1차 미분 근사 (인접 픽셀 차이)
+        const gx = grays[idx + 1] - grays[idx - 1];
+        const gy = grays[idx + width] - grays[idx - width];
+        const g = Math.abs(gx) + Math.abs(gy); // 연산 속도를 위한 절대값의 합
 
-        if (isContrast || isBright) {
+        if (g > gradThreshold) {
           xs.push(x);
           ys.push(y);
         }
       }
     }
 
-    if (xs.length < 80) return null; // 최소 필터링 통과 조건
+    // 감지된 에지 픽셀 수가 너무 적으면 카드 없음으로 판단
+    if (xs.length < 60) return null;
 
-    // 오름차순 정렬하여 외곽의 노이즈/그림자/손가락 제거 (상하위 3% 절삭)
+    // 3. 외곽 오차(먼지, 미세 반사광) 제거를 위해 오름차순 정렬 후 상하위 5% 절삭 (Percentile Outlier Rejection)
     xs.sort((a, b) => a - b);
     ys.sort((a, b) => a - b);
 
-    const discard = Math.floor(xs.length * 0.03);
+    const discard = Math.floor(xs.length * 0.05);
     const minX = xs[discard];
     const maxX = xs[xs.length - 1 - discard];
     const minY = ys[discard];
@@ -269,18 +257,12 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
     
     if (w <= 0 || h <= 0) return null;
 
-    const totalArea = (width - 2 * marginX) * (height - 2 * marginY);
-    const density = xs.length / totalArea;
-
-    // 감지 영역 크기 제약 완화 (더 멀리서 찍거나 작게 찍어도 감지됨)
-    if (w > width * 0.20 && w < width * 0.98 && h > height * 0.18 && h < height * 0.98) {
-      // 밀도 기준 완화
-      if (density > 0.04 && density < 0.90) {
-        const ratio = w / h;
-        // 세로형 명함 및 기울어짐에 모두 기민하게 대응할 수 있도록 비율 범위 대폭 확장 (0.4 ~ 2.5)
-        if (ratio > 0.4 && ratio < 2.5) {
-          return { x: minX, y: minY, w, h };
-        }
+    // 4. 명함 크기 및 비율 검증 (너무 작거나 크지 않고 가로/세로 비율이 적절한지 체크)
+    if (w > width * 0.30 && w < width * 0.95 && h > height * 0.22 && h < height * 0.95) {
+      const ratio = w / h;
+      // 세로형 명함(약 0.6) 및 가로형 명함(약 1.6)을 모두 포함하는 여유로운 오차범위 (0.45 ~ 2.2)
+      if (ratio > 0.45 && ratio < 2.2) {
+        return { x: minX, y: minY, w, h };
       }
     }
     return null;
