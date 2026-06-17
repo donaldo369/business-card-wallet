@@ -731,17 +731,19 @@ export default function Home() {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {user && (
-            <div className="user-profile-header">
-              <User size={14} className="color-violet" />
-              <span className="user-email-text">{user.email}</span>
-              <button onClick={handleSignOut} className="signout-btn" title="로그아웃">
-                <LogOut size={16} />
+            <>
+              <div className="user-profile-header">
+                <User size={14} className="color-violet" />
+                <span className="user-email-text">{user.email}</span>
+                <button onClick={handleSignOut} className="signout-btn" title="로그아웃">
+                  <LogOut size={16} />
+                </button>
+              </div>
+              <button onClick={() => setShowSettings(true)} className="settings-btn" title="설정">
+                <Settings size={20} />
               </button>
-            </div>
+            </>
           )}
-          <button onClick={() => setShowSettings(true)} className="settings-btn" title="설정">
-            <Settings size={20} />
-          </button>
         </div>
       </header>
 
