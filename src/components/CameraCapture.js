@@ -79,6 +79,9 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
     }
   };
 
+  // 이전 프레임의 감지 결과를 저장하여 떨림 방지 (temporal smoothing)
+  const prevBoxRef = useRef(null);
+
   // 실시간 명함 영역 경계선 감지 루프
   const startLiveDetection = () => {
     const video = videoRef.current;
@@ -90,13 +93,13 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
 
     const drawDefaultGuideBox = (ctx, cW, cH) => {
       const targetW = cW * 0.82;
-      const targetH = targetW / 1.586; // 명함 가로세로 비율
+      const targetH = targetW / 1.586;
       const x = (cW - targetW) / 2;
       const y = (cH - targetH) / 2;
 
       ctx.strokeStyle = 'rgba(255, 122, 89, 0.55)';
       ctx.lineWidth = 2.5;
-      ctx.setLineDash([6, 6]); // 점선 가이드라인
+      ctx.setLineDash([6, 6]);
 
       const r = 14;
       ctx.beginPath();
@@ -111,8 +114,11 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
       ctx.quadraticCurveTo(x, y, x + r, y);
       ctx.closePath();
       ctx.stroke();
-      ctx.setLineDash([]); // 점선 원복
+      ctx.setLineDash([]);
     };
+
+    // 감지 안 된 연속 프레임 카운터 (떨림 방지)
+    let missCount = 0;
 
     detectIntervalRef.current = setInterval(() => {
       if (video.paused || video.ended || video.readyState < 2) return;
@@ -126,35 +132,58 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
         canvas.height = video.clientHeight;
       }
 
-      // 빠른 연산을 위해 해상도 대폭 축소
-      const scale = 0.15;
-      procCanvas.width = vW * scale;
-      procCanvas.height = vH * scale;
+      // 해상도 축소 (0.2 = 기존 0.15보다 더 세밀하게 분석)
+      const scale = 0.2;
+      procCanvas.width = Math.round(vW * scale);
+      procCanvas.height = Math.round(vH * scale);
       
       try {
         procCtx.drawImage(video, 0, 0, procCanvas.width, procCanvas.height);
         const imgData = procCtx.getImageData(0, 0, procCanvas.width, procCanvas.height);
         
-        // 고성능 대비 영역 바운딩 박스 감지 적용 (회전/기울임 대응)
-        const box = detectContrastBoundingBox(imgData, procCanvas.width, procCanvas.height);
+        let rawBox = detectCardBox(imgData, procCanvas.width, procCanvas.height);
+
+        // temporal smoothing: 현재 결과를 이전 결과와 부드럽게 보간
+        let smoothedBox = null;
+        if (rawBox) {
+          missCount = 0;
+          if (prevBoxRef.current) {
+            const alpha = 0.45; // 0=이전 프레임만, 1=현재 프레임만
+            smoothedBox = {
+              x: prevBoxRef.current.x * (1 - alpha) + rawBox.x * alpha,
+              y: prevBoxRef.current.y * (1 - alpha) + rawBox.y * alpha,
+              w: prevBoxRef.current.w * (1 - alpha) + rawBox.w * alpha,
+              h: prevBoxRef.current.h * (1 - alpha) + rawBox.h * alpha,
+            };
+          } else {
+            smoothedBox = rawBox;
+          }
+          prevBoxRef.current = smoothedBox;
+        } else {
+          missCount++;
+          // 3프레임 연속 미감지 시에만 박스를 숨김 (깜빡임 방지)
+          if (missCount < 3 && prevBoxRef.current) {
+            smoothedBox = prevBoxRef.current;
+          } else {
+            prevBoxRef.current = null;
+          }
+        }
 
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        if (box) {
+        if (smoothedBox) {
           const cW = canvas.width;
           const cH = canvas.height;
 
-          // object-fit: cover 배율 및 오프셋 계산
           const s = Math.max(cW / vW, cH / vH);
           const offsetX = (cW - vW * s) / 2;
           const offsetY = (cH - vH * s) / 2;
 
-          // 원본 비디오 해상도로 복원
-          const origX = box.x / scale;
-          const origY = box.y / scale;
-          const origW = box.w / scale;
-          const origH = box.h / scale;
+          const origX = smoothedBox.x / scale;
+          const origY = smoothedBox.y / scale;
+          const origW = smoothedBox.w / scale;
+          const origH = smoothedBox.h / scale;
 
           const screenBox = {
             x: origX * s + offsetX,
@@ -170,8 +199,7 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
             h: origH
           });
 
-          // 주황색 반투명 오버레이 박스 렌더링 (실시간 스냅)
-          ctx.fillStyle = 'rgba(255, 122, 89, 0.24)';
+          ctx.fillStyle = 'rgba(255, 122, 89, 0.20)';
           ctx.strokeStyle = '#ff7a59';
           ctx.lineWidth = 4;
           
@@ -191,58 +219,141 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
           ctx.stroke();
         } else {
           setDetectedBox(null);
-          // 명함 감지 전에는 화면 중앙에 점선 가이드 박스 표시
           drawDefaultGuideBox(ctx, canvas.width, canvas.height);
         }
       } catch (e) {
-        console.error('실시간 감지 루프 에러:', e);
+        // 에러 무시
       }
-    }, 120); // 프레임 속도 개선 (초당 8회 감지)
+    }, 100); // 초당 10회
   };
 
-  // 실시간 에지(경계선) 감지 알고리즘 (로컬 그래디언트 기반으로 조명/배경 무관하게 명함 테두리 추적)
-  const detectContrastBoundingBox = (imgData, width, height) => {
+  // ========== 핵심 감지 엔진 ==========
+  // 전략 A: 행/열 밝기 투영 (배경과 명함의 밝기 차이를 행/열 단위로 분석)
+  // 전략 B: Sobel 에지 감지 (에지 픽셀 분포로 바운딩 박스 추정)
+  // 두 전략 중 하나라도 성공하면 결과 반환 (A 우선)
+  const detectCardBox = (imgData, width, height) => {
     const data = imgData.data;
+    const total = width * height;
     
-    // 1. 빠른 연산을 위해 그레이스케일(밝기) 버퍼 생성
-    const grays = new Uint8Array(width * height);
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const idx = (y * width + x) * 4;
-        // 인간 눈의 밝기 인지 비율 적용 (Luminance)
-        grays[y * width + x] = data[idx] * 0.299 + data[idx+1] * 0.587 + data[idx+2] * 0.114;
-      }
+    // 1. 그레이스케일 변환
+    const grays = new Uint8Array(total);
+    for (let i = 0; i < total; i++) {
+      const idx = i * 4;
+      grays[i] = Math.round(data[idx] * 0.299 + data[idx+1] * 0.587 + data[idx+2] * 0.114);
     }
 
-    // 화면 가장자리 8% 영역은 노이즈(손가락, 배경잡음) 방지를 위해 제외
-    const marginX = Math.floor(width * 0.08);
-    const marginY = Math.floor(height * 0.08);
+    // ===== 전략 A: 행/열 밝기 투영 =====
+    const resultA = detectByProjection(grays, width, height);
+    if (resultA) return resultA;
+
+    // ===== 전략 B: 에지 감지 (Fallback) =====
+    const resultB = detectByEdge(grays, width, height);
+    return resultB;
+  };
+
+  // 전략 A: 행/열 밝기 투영 분석
+  const detectByProjection = (grays, width, height) => {
+    // 화면 테두리 3px 줄의 평균 밝기를 배경 기준값으로 사용
+    let borderSum = 0, borderCount = 0;
+    for (let y = 0; y < 3; y++) {
+      for (let x = 0; x < width; x++) { borderSum += grays[y * width + x]; borderCount++; }
+    }
+    for (let y = height - 3; y < height; y++) {
+      for (let x = 0; x < width; x++) { borderSum += grays[y * width + x]; borderCount++; }
+    }
+    for (let y = 3; y < height - 3; y++) {
+      for (let x = 0; x < 3; x++) { borderSum += grays[y * width + x]; borderCount++; }
+      for (let x = width - 3; x < width; x++) { borderSum += grays[y * width + x]; borderCount++; }
+    }
+    const bgAvg = borderSum / borderCount;
+
+    // 각 행의 평균 밝기가 배경과 얼마나 다른지 계산
+    const rowDiff = new Float32Array(height);
+    for (let y = 0; y < height; y++) {
+      let sum = 0;
+      for (let x = 0; x < width; x++) {
+        sum += Math.abs(grays[y * width + x] - bgAvg);
+      }
+      rowDiff[y] = sum / width;
+    }
+
+    // 각 열의 평균 밝기가 배경과 얼마나 다른지 계산
+    const colDiff = new Float32Array(width);
+    for (let x = 0; x < width; x++) {
+      let sum = 0;
+      for (let y = 0; y < height; y++) {
+        sum += Math.abs(grays[y * width + x] - bgAvg);
+      }
+      colDiff[x] = sum / height;
+    }
+
+    // 차이값의 중앙값을 계산하여 동적 임계치 결정
+    const sortedRowDiff = Array.from(rowDiff).sort((a, b) => a - b);
+    const sortedColDiff = Array.from(colDiff).sort((a, b) => a - b);
+    const rowMedian = sortedRowDiff[Math.floor(height * 0.5)];
+    const colMedian = sortedColDiff[Math.floor(width * 0.5)];
+
+    // 임계치 = 중앙값의 1.3배 (배경과 뚜렷이 다른 행/열만 선택)
+    const rowThreshold = Math.max(rowMedian * 1.3, 8);
+    const colThreshold = Math.max(colMedian * 1.3, 8);
+
+    // 위에서부터 첫 번째 유의미한 행 찾기
+    let top = -1;
+    for (let y = 2; y < height - 2; y++) {
+      if (rowDiff[y] > rowThreshold) { top = y; break; }
+    }
+    let bottom = -1;
+    for (let y = height - 3; y >= 2; y--) {
+      if (rowDiff[y] > rowThreshold) { bottom = y; break; }
+    }
+    let left = -1;
+    for (let x = 2; x < width - 2; x++) {
+      if (colDiff[x] > colThreshold) { left = x; break; }
+    }
+    let right = -1;
+    for (let x = width - 3; x >= 2; x--) {
+      if (colDiff[x] > colThreshold) { right = x; break; }
+    }
+
+    if (top < 0 || bottom < 0 || left < 0 || right < 0) return null;
+
+    const w = right - left;
+    const h = bottom - top;
+    if (w <= 0 || h <= 0) return null;
+
+    if (w > width * 0.22 && w < width * 0.96 && h > height * 0.18 && h < height * 0.96) {
+      const ratio = w / h;
+      if (ratio > 0.35 && ratio < 2.8) {
+        return { x: left, y: top, w, h };
+      }
+    }
+    return null;
+  };
+
+  // 전략 B: Sobel 에지 감지 (Fallback)
+  const detectByEdge = (grays, width, height) => {
+    const marginX = Math.floor(width * 0.05);
+    const marginY = Math.floor(height * 0.05);
     
     const xs = [];
     const ys = [];
-    const gradThreshold = 22; // 에지 감지 감도 (낮을수록 민감, 높을수록 뚜렷한 선만 감지)
 
-    // 2. 가로/세로 방향 로컬 그래디언트(경계 엣지) 계산
     for (let y = marginY; y < height - marginY; y++) {
       for (let x = marginX; x < width - marginX; x++) {
         const idx = y * width + x;
-        
-        // 1차 미분 근사 (인접 픽셀 차이)
         const gx = grays[idx + 1] - grays[idx - 1];
         const gy = grays[idx + width] - grays[idx - width];
-        const g = Math.abs(gx) + Math.abs(gy); // 연산 속도를 위한 절대값의 합
+        const g = Math.abs(gx) + Math.abs(gy);
 
-        if (g > gradThreshold) {
+        if (g > 18) {
           xs.push(x);
           ys.push(y);
         }
       }
     }
 
-    // 감지된 에지 픽셀 수가 너무 적으면 카드 없음으로 판단
-    if (xs.length < 60) return null;
+    if (xs.length < 50) return null;
 
-    // 3. 외곽 오차(먼지, 미세 반사광) 제거를 위해 오름차순 정렬 후 상하위 5% 절삭 (Percentile Outlier Rejection)
     xs.sort((a, b) => a - b);
     ys.sort((a, b) => a - b);
 
@@ -257,11 +368,9 @@ export default function CameraCapture({ onImageSelected, onClose, onManualInput 
     
     if (w <= 0 || h <= 0) return null;
 
-    // 4. 명함 크기 및 비율 검증 (너무 작거나 크지 않고 가로/세로 비율이 적절한지 체크)
-    if (w > width * 0.30 && w < width * 0.95 && h > height * 0.22 && h < height * 0.95) {
+    if (w > width * 0.25 && w < width * 0.96 && h > height * 0.18 && h < height * 0.96) {
       const ratio = w / h;
-      // 세로형 명함(약 0.6) 및 가로형 명함(약 1.6)을 모두 포함하는 여유로운 오차범위 (0.45 ~ 2.2)
-      if (ratio > 0.45 && ratio < 2.2) {
+      if (ratio > 0.35 && ratio < 2.8) {
         return { x: minX, y: minY, w, h };
       }
     }
