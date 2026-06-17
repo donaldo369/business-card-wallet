@@ -48,7 +48,6 @@ export default function Home() {
   const [user, setUser] = useState(null);
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
-  const [isSignUpMode, setIsSignUpMode] = useState(false);
   const fileInputRef = useRef(null);
 
   const handleAddNewCard = () => {
@@ -160,21 +159,12 @@ export default function Home() {
 
     setLoading(true);
     try {
-      if (isSignUpMode) {
-        const { error } = await sb.auth.signUp({
-          email: authEmail,
-          password: authPassword,
-        });
-        if (error) throw error;
-        alert('회원가입 확인 메일이 발송되었거나 가입이 완료되었습니다. 확인 후 로그인해주세요.');
-      } else {
-        const { data, error } = await sb.auth.signInWithPassword({
-          email: authEmail,
-          password: authPassword,
-        });
-        if (error) throw error;
-        setUser(data.user);
-      }
+      const { data, error } = await sb.auth.signInWithPassword({
+        email: authEmail,
+        password: authPassword,
+      });
+      if (error) throw error;
+      setUser(data.user);
       setAuthPassword('');
     } catch (err) {
       alert(`인증 실패: ${err.message}`);
@@ -814,23 +804,11 @@ export default function Home() {
               ) : (
                 <>
                   <LogIn size={16} style={{ marginRight: '8px' }} />
-                  <span>{isSignUpMode ? '회원가입 완료하기' : '로그인'}</span>
+                  <span>로그인</span>
                 </>
               )}
             </button>
           </form>
-
-          <div style={{ textAlign: 'center', marginTop: '20px', fontSize: '12px' }}>
-            <span style={{ color: 'var(--text-secondary)' }}>
-              {isSignUpMode ? '이미 계정이 있으신가요? ' : '처음 방문하셨나요? '}
-            </span>
-            <button 
-              onClick={() => setIsSignUpMode(!isSignUpMode)} 
-              style={{ background: 'none', border: 'none', color: 'var(--primary)', fontWeight: 700, cursor: 'pointer', padding: 0 }}
-            >
-              {isSignUpMode ? '로그인하기' : '회원가입'}
-            </button>
-          </div>
         </div>
       )}
 
