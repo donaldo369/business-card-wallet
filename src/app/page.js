@@ -4,7 +4,8 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Settings, Search, Plus, Check, Mail, Phone, MapPin, 
   Building2, ExternalLink, Trash2, Edit3, 
-  Save, X, FileText, Sparkles, AlertCircle, RefreshCw, Smartphone, History, ChevronDown
+  Save, X, FileText, Sparkles, AlertCircle, RefreshCw, Smartphone, History, ChevronDown,
+  LogIn, LogOut, User, Lock
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { getSupabaseClient } from '../lib/supabase';
@@ -44,6 +45,10 @@ export default function Home() {
   });
 
   const [supabaseReady, setSupabaseReady] = useState(false);
+  const [user, setUser] = useState(null);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [isSignUpMode, setIsSignUpMode] = useState(false);
   const fileInputRef = useRef(null);
 
   const handleAddNewCard = () => {
@@ -107,6 +112,19 @@ export default function Home() {
           : null
       );
       setSupabaseReady(!!client);
+
+      if (client) {
+        // 현재 세션 가져오기 및 상태 감지
+        client.auth.getSession().then(({ data: { session } }) => {
+          setUser(session?.user || null);
+        });
+
+        const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
+          setUser(session?.user || null);
+        });
+
+        return () => subscription.unsubscribe();
+      }
     }
   }, []);
 
@@ -132,6 +150,51 @@ export default function Home() {
     }
   };
 
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    const sb = getSupabaseClient();
+    if (!sb) {
+      alert('Supabase 연결 설정이 필요합니다.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      if (isSignUpMode) {
+        const { error } = await sb.auth.signUp({
+          email: authEmail,
+          password: authPassword,
+        });
+        if (error) throw error;
+        alert('회원가입 확인 메일이 발송되었거나 가입이 완료되었습니다. 확인 후 로그인해주세요.');
+      } else {
+        const { data, error } = await sb.auth.signInWithPassword({
+          email: authEmail,
+          password: authPassword,
+        });
+        if (error) throw error;
+        setUser(data.user);
+      }
+      setAuthPassword('');
+    } catch (err) {
+      alert(`인증 실패: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    const sb = getSupabaseClient();
+    if (!sb) return;
+    try {
+      await sb.auth.signOut();
+      setUser(null);
+      setCards([]);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const loadCards = useCallback(async (client) => {
     const sb = client || getSupabaseClient();
     if (!sb) {
@@ -139,15 +202,34 @@ export default function Home() {
       return;
     }
     
+    // 비로그인 상태면 카드를 불러오지 않음
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session?.user) {
+      setCards([]);
+      setInitialLoading(false);
+      return;
+    }
+    
     setLoading(true);
     try {
+      // user_id가 테이블에 있다면 user_id 필터링 적용 (동일 사용자의 정보만 보장)
       const { data, error } = await sb
         .from('business_cards')
         .select('*')
+        .eq('user_id', session.user.id)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      setCards(data || []);
+      if (error) {
+        // user_id 컬럼이 없을 경우를 위한 폴백
+        const { data: fallbackData, error: fallbackError } = await sb
+          .from('business_cards')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (fallbackError) throw fallbackError;
+        setCards(fallbackData || []);
+      } else {
+        setCards(data || []);
+      }
     } catch (err) {
       console.error('명함 로드 에러:', err);
     } finally {
@@ -162,7 +244,7 @@ export default function Home() {
     } else {
       setInitialLoading(false);
     }
-  }, [supabaseReady, loadCards]);
+  }, [supabaseReady, user, loadCards]);
 
   const uploadImageToSupabase = async (base64Data) => {
     const sb = getSupabaseClient();
@@ -316,6 +398,7 @@ export default function Home() {
           finalImageUrl = await uploadImageToSupabase(card.image_url);
         }
 
+        const { data: { session } } = await sb.auth.getSession();
         const cardData = {
           name: card.name,
           first_name: card.first_name,
@@ -328,6 +411,7 @@ export default function Home() {
           mobile_phone: card.mobile_phone,
           address: card.address,
           image_url: finalImageUrl,
+          user_id: session?.user?.id || null,
         };
 
         // 중복 검사: 동일 이름+전화번호가 있으면 자동 업데이트
@@ -467,6 +551,7 @@ export default function Home() {
         finalImageUrl = await uploadImageToSupabase(editingCard.image_url);
       }
 
+      const { data: { session } } = await sb.auth.getSession();
       const cardData = {
         name: editingCard.name,
         first_name: editingCard.first_name,
@@ -479,6 +564,7 @@ export default function Home() {
         mobile_phone: editingCard.mobile_phone,
         address: editingCard.address,
         image_url: finalImageUrl,
+        user_id: session?.user?.id || null,
       };
 
       if (editingCard.id) {
@@ -653,9 +739,20 @@ export default function Home() {
           </div>
         </div>
 
-        <button onClick={() => setShowSettings(true)} className="settings-btn">
-          <Settings size={20} />
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {user && (
+            <div className="user-profile-header">
+              <User size={14} className="color-violet" />
+              <span className="user-email-text">{user.email}</span>
+              <button onClick={handleSignOut} className="signout-btn" title="로그아웃">
+                <LogOut size={16} />
+              </button>
+            </div>
+          )}
+          <button onClick={() => setShowSettings(true)} className="settings-btn" title="설정">
+            <Settings size={20} />
+          </button>
+        </div>
       </header>
 
       {/* Supabase 미연결 경고 */}
@@ -674,74 +771,138 @@ export default function Home() {
         </div>
       )}
 
-      {/* 메인 콘텐츠 영역 */}
-      <main style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-        {/* 검색 및 명함 추가 바 */}
-        <div className="actions-bar">
-          <div className="search-wrapper">
-            <Search size={18} className="search-icon" />
+      {/* 로그인 화면 */}
+      {supabaseReady && !user && !initialLoading && (
+        <div className="glass auth-container" style={{ margin: '40px auto', maxWidth: '400px', width: '100%', padding: '32px' }}>
+          <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+            <div style={{ display: 'inline-flex', padding: '12px', background: 'rgba(99, 102, 241, 0.1)', borderRadius: '16px', marginBottom: '12px', color: 'var(--primary)' }}>
+              <Lock size={28} />
+            </div>
+            <h2 style={{ fontSize: '20px', fontWeight: 800 }}>개인 명함첩 로그인</h2>
+            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+              이메일 주소로 로그인하여 안전하게 명함을 관리하세요.
+            </p>
+          </div>
+
+          <form onSubmit={handleAuthSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div className="form-group">
+              <label>이메일 주소</label>
+              <input
+                type="email"
+                required
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                placeholder="example@email.com"
+                className="premium-input"
+              />
+            </div>
+            <div className="form-group">
+              <label>비밀번호</label>
+              <input
+                type="password"
+                required
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                placeholder="••••••••"
+                className="premium-input"
+              />
+            </div>
+
+            <button type="submit" disabled={loading} className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '14px', borderRadius: '14px', marginTop: '8px' }}>
+              {loading ? (
+                <RefreshCw size={16} style={{ animation: 'spin 1s infinite linear' }} />
+              ) : (
+                <>
+                  <LogIn size={16} style={{ marginRight: '8px' }} />
+                  <span>{isSignUpMode ? '회원가입 완료하기' : '로그인'}</span>
+                </>
+              )}
+            </button>
+          </form>
+
+          <div style={{ textAlign: 'center', marginTop: '20px', fontSize: '12px' }}>
+            <span style={{ color: 'var(--text-secondary)' }}>
+              {isSignUpMode ? '이미 계정이 있으신가요? ' : '처음 방문하셨나요? '}
+            </span>
+            <button 
+              onClick={() => setIsSignUpMode(!isSignUpMode)} 
+              style={{ background: 'none', border: 'none', color: 'var(--primary)', fontWeight: 700, cursor: 'pointer', padding: 0 }}
+            >
+              {isSignUpMode ? '로그인하기' : '회원가입'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 메인 콘텐츠 영역 (로그인 완료 시 노출) */}
+      {user && (
+        <main style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+          {/* 검색 및 명함 추가 바 */}
+          <div className="actions-bar">
+            <div className="search-wrapper">
+              <Search size={18} className="search-icon" />
+              <input
+                type="text"
+                placeholder="이름, 회사명, 이메일, 전화번호 검색..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="premium-input search-input"
+              />
+            </div>
+            <button onClick={handleAddNewCard} className="btn btn-primary btn-add">
+              <Plus size={18} />
+              <span>새 명함 추가</span>
+            </button>
             <input
-              type="text"
-              placeholder="이름, 회사명, 이메일, 전화번호 검색..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="premium-input search-input"
+              type="file"
+              ref={fileInputRef}
+              onChange={handleDesktopFileChange}
+              accept="image/*"
+              multiple
+              style={{ display: 'none' }}
             />
           </div>
-          <button onClick={handleAddNewCard} className="btn btn-primary btn-add">
-            <Plus size={18} />
-            <span>새 명함 추가</span>
-          </button>
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleDesktopFileChange}
-            accept="image/*"
-            multiple
-            style={{ display: 'none' }}
-          />
-        </div>
 
-        {/* 촬영 및 스캔 가이드 */}
-        {showCapture && (
-          <CameraCapture 
-            onImageSelected={async (src) => {
-              setShowCapture(false);
-              await extractCardInfo(src);
-            }}
-            onBatchSelected={handleBatchProcess}
-            onClose={() => setShowCapture(false)}
-            onManualInput={() => {
-              setShowCapture(false);
-              setEditingCard({
-                id: null,
-                name: '',
-                first_name: '',
-                last_name: '',
-                company: '',
-                email: '',
-                department: '',
-                title: '',
-                office_phone: '',
-                mobile_phone: '',
-                address: '',
-                image_url: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="%231e293b"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%2364748b" font-family="sans-serif" font-size="12">수동 입력</text></svg>'
-              });
-            }}
-          />
-        )}
+          {/* 촬영 및 스캔 가이드 */}
+          {showCapture && (
+            <CameraCapture 
+              onImageSelected={async (src) => {
+                setShowCapture(false);
+                await extractCardInfo(src);
+              }}
+              onBatchSelected={handleBatchProcess}
+              onClose={() => setShowCapture(false)}
+              onManualInput={() => {
+                setShowCapture(false);
+                setEditingCard({
+                  id: null,
+                  name: '',
+                  first_name: '',
+                  last_name: '',
+                  company: '',
+                  email: '',
+                  department: '',
+                  title: '',
+                  office_phone: '',
+                  mobile_phone: '',
+                  address: '',
+                  image_url: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="%231e293b"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%2364748b" font-family="sans-serif" font-size="12">수동 입력</text></svg>'
+                });
+              }}
+            />
+          )}
 
-        {/* OCR 데이터 파싱 중 로딩 상태 (단일) */}
-        {isExtracting && (
-          <div className="loading-overlay">
-            <div className="spinner-relative">
-              <div className="spinner"></div>
-              <Sparkles size={24} className="spinner-icon" />
+          {/* OCR 데이터 파싱 중 로딩 상태 (단일) */}
+          {isExtracting && (
+            <div className="loading-overlay">
+              <div className="spinner-relative">
+                <div className="spinner"></div>
+                <Sparkles size={24} className="spinner-icon" />
+              </div>
+              <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#fff', marginBottom: '4px' }}>인공지능 정보 분석 중</h3>
+              <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>명함 이미지로부터 이름, 연락처 등을 식별하고 있습니다...</p>
             </div>
-            <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#fff', marginBottom: '4px' }}>인공지능 정보 분석 중</h3>
-            <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>명함 이미지로부터 이름, 연락처 등을 식별하고 있습니다...</p>
-          </div>
-        )}
+          )}
 
         {/* 배치 처리 진행 중 오버레이 */}
         {batchProcessing && (
@@ -1192,6 +1353,7 @@ export default function Home() {
           )}
         </section>
       </main>
+      )}
 
       {/* 이미지 조절 크로퍼 */}
       {selectedImage && (
