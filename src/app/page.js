@@ -30,7 +30,10 @@ export default function Home() {
   // 배치 스캔 상태
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
-  const [batchResults, setBatchResults] = useState([]); // 배치 처리 결과 목록
+  const [batchResults, setBatchResults] = useState([]);
+
+  // 중복 감지 상태
+  const [duplicateInfo, setDuplicateInfo] = useState(null); // { existingCard, newCardData, newImageUrl }
 
   const [settings, setSettings] = useState({
     supabaseUrl: '',
@@ -304,6 +307,7 @@ export default function Home() {
 
     setLoading(true);
     let savedCount = 0;
+    let updatedCount = 0;
     for (const card of successCards) {
       try {
         let finalImageUrl = card.image_url;
@@ -325,14 +329,27 @@ export default function Home() {
           image_url: finalImageUrl,
         };
 
-        const { error } = await sb.from('business_cards').insert([cardData]);
-        if (!error) savedCount++;
+        // 중복 검사: 동일 이름+전화번호가 있으면 자동 업데이트
+        const existing = await findDuplicate(card.name, card.mobile_phone);
+        if (existing) {
+          const { error } = await sb
+            .from('business_cards')
+            .update(cardData)
+            .eq('id', existing.id);
+          if (!error) updatedCount++;
+        } else {
+          const { error } = await sb.from('business_cards').insert([cardData]);
+          if (!error) savedCount++;
+        }
       } catch (err) {
         console.error('배치 저장 실패:', err);
       }
     }
 
-    alert(`${savedCount}/${successCards.length}장의 명함이 저장되었습니다.`);
+    const parts = [];
+    if (savedCount > 0) parts.push(`${savedCount}장 새로 추가`);
+    if (updatedCount > 0) parts.push(`${updatedCount}장 업데이트`);
+    alert(`처리 완료: ${parts.join(', ')}`);
     setBatchResults([]);
     loadCards();
     setLoading(false);
@@ -343,6 +360,94 @@ export default function Home() {
     setSelectedImage(null);
     setShowCapture(false);
     await extractCardInfo(croppedImg);
+  };
+
+  // 중복 명함 검사: 이름 + 핸드폰 번호로 DB 조회
+  const findDuplicate = async (name, mobilePhone, excludeId = null) => {
+    const sb = getSupabaseClient();
+    if (!sb || !name || !mobilePhone) return null;
+
+    // 전화번호에서 공백/하이픈 제거하여 비교
+    const normalizedPhone = mobilePhone.replace(/[\s\-]/g, '');
+    
+    try {
+      let query = sb.from('business_cards').select('*').eq('name', name);
+      if (excludeId) {
+        query = query.neq('id', excludeId);
+      }
+      const { data } = await query;
+      
+      if (data && data.length > 0) {
+        // 정규화된 전화번호로 비교
+        return data.find(card => 
+          card.mobile_phone && card.mobile_phone.replace(/[\s\-]/g, '') === normalizedPhone
+        ) || null;
+      }
+    } catch (err) {
+      console.error('중복 검사 오류:', err);
+    }
+    return null;
+  };
+
+  // 중복 확인 후 기존 카드 업데이트 실행
+  const handleDuplicateUpdate = async () => {
+    if (!duplicateInfo) return;
+    const sb = getSupabaseClient();
+    if (!sb) return;
+
+    setLoading(true);
+    try {
+      const { error } = await sb
+        .from('business_cards')
+        .update(duplicateInfo.newCardData)
+        .eq('id', duplicateInfo.existingCard.id);
+      
+      if (error) throw error;
+
+      // HubSpot 연동된 카드면 자동 업데이트
+      if (duplicateInfo.existingCard.hubspot_id) {
+        try {
+          await syncToHubSpot({
+            ...duplicateInfo.newCardData,
+            id: duplicateInfo.existingCard.id,
+            hubspot_id: duplicateInfo.existingCard.hubspot_id
+          });
+        } catch (e) { console.warn('HubSpot 업데이트 실패:', e); }
+      }
+
+      alert('기존 명함이 업데이트되었습니다.');
+      setEditingCard(null);
+      setCroppedImage(null);
+      setDuplicateInfo(null);
+      loadCards();
+    } catch (err) {
+      alert(`업데이트 실패: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 중복 무시하고 새로 추가
+  const handleDuplicateAddNew = async () => {
+    if (!duplicateInfo) return;
+    const sb = getSupabaseClient();
+    if (!sb) return;
+
+    setLoading(true);
+    try {
+      const { error } = await sb.from('business_cards').insert([duplicateInfo.newCardData]);
+      if (error) throw error;
+
+      alert('새 명함이 추가되었습니다.');
+      setEditingCard(null);
+      setCroppedImage(null);
+      setDuplicateInfo(null);
+      loadCards();
+    } catch (err) {
+      alert(`저장 실패: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSaveCard = async (e) => {
@@ -375,39 +480,43 @@ export default function Home() {
         image_url: finalImageUrl,
       };
 
-      let error;
       if (editingCard.id) {
-        const { error: err } = await sb
+        // 기존 카드 수정 모드
+        const { error } = await sb
           .from('business_cards')
           .update(cardData)
           .eq('id', editingCard.id);
-        error = err;
-      } else {
-        const { error: err } = await sb
-          .from('business_cards')
-          .insert([cardData]);
-        error = err;
-      }
+        if (error) throw error;
 
-      if (error) throw error;
-
-      // 이미 HubSpot에 연동된 카드인 경우, HubSpot 연락처 정보도 자동 업데이트
-      if (editingCard.id && editingCard.hubspot_id) {
-        try {
-          await syncToHubSpot({
-            ...cardData,
-            id: editingCard.id,
-            hubspot_id: editingCard.hubspot_id
-          });
-        } catch (hubspotErr) {
-          console.warn('HubSpot 자동 업데이트 실패:', hubspotErr);
+        if (editingCard.hubspot_id) {
+          try {
+            await syncToHubSpot({ ...cardData, id: editingCard.id, hubspot_id: editingCard.hubspot_id });
+          } catch (e) { console.warn('HubSpot 자동 업데이트 실패:', e); }
         }
-      }
 
-      alert('명함이 성공적으로 저장되었습니다.');
-      setEditingCard(null);
-      setCroppedImage(null);
-      loadCards();
+        alert('명함이 성공적으로 저장되었습니다.');
+        setEditingCard(null);
+        setCroppedImage(null);
+        loadCards();
+      } else {
+        // 새 카드 추가 모드 → 중복 검사
+        const existing = await findDuplicate(editingCard.name, editingCard.mobile_phone);
+        if (existing) {
+          // 중복 발견 → 확인 모달 표시
+          setDuplicateInfo({ existingCard: existing, newCardData: cardData });
+          setLoading(false);
+          return;
+        }
+
+        // 중복 없으면 바로 삽입
+        const { error } = await sb.from('business_cards').insert([cardData]);
+        if (error) throw error;
+
+        alert('명함이 성공적으로 저장되었습니다.');
+        setEditingCard(null);
+        setCroppedImage(null);
+        loadCards();
+      }
     } catch (err) {
       console.error(err);
       alert(`저장 실패: ${err.message}`);
@@ -707,6 +816,105 @@ export default function Home() {
                 {loading ? '저장 중...' : `${batchResults.filter(c => c._status === 'success').length}장 전체 저장`}
               </button>
             )}
+          </div>
+        )}
+
+        {/* 중복 명함 확인 모달 */}
+        {duplicateInfo && (
+          <div className="loading-overlay" style={{ zIndex: 200, padding: '20px' }}>
+            <div className="glass" style={{ 
+              padding: '28px', 
+              maxWidth: '440px', 
+              width: '100%',
+              animation: 'fadeIn 0.2s ease'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
+                <AlertCircle size={22} style={{ color: '#f59e0b', flexShrink: 0 }} />
+                <h3 style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+                  동일인 명함 발견
+                </h3>
+              </div>
+
+              <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px', lineHeight: '1.5' }}>
+                <strong style={{ color: 'var(--text-primary)' }}>{duplicateInfo.existingCard.name}</strong> 님의 명함이 이미 등록되어 있습니다.
+                기존 정보를 새 명함으로 업데이트하시겠습니까?
+              </p>
+
+              {/* 기존 vs 새 정보 비교 */}
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: '1fr 1fr', 
+                gap: '12px', 
+                marginBottom: '20px',
+                fontSize: '12px'
+              }}>
+                <div style={{ 
+                  padding: '12px', 
+                  background: 'rgba(239,68,68,0.08)', 
+                  borderRadius: '10px',
+                  border: '1px solid rgba(239,68,68,0.2)'
+                }}>
+                  <div style={{ fontWeight: 700, color: '#ef4444', marginBottom: '8px', fontSize: '11px' }}>📋 기존 정보</div>
+                  <div style={{ color: 'var(--text-secondary)', lineHeight: '1.6' }}>
+                    <div>{duplicateInfo.existingCard.company || '(회사 없음)'}</div>
+                    <div>{duplicateInfo.existingCard.title || '(직함 없음)'}</div>
+                    <div>{duplicateInfo.existingCard.email || '(이메일 없음)'}</div>
+                  </div>
+                </div>
+                <div style={{ 
+                  padding: '12px', 
+                  background: 'rgba(34,197,94,0.08)', 
+                  borderRadius: '10px',
+                  border: '1px solid rgba(34,197,94,0.2)'
+                }}>
+                  <div style={{ fontWeight: 700, color: '#22c55e', marginBottom: '8px', fontSize: '11px' }}>✨ 새 정보</div>
+                  <div style={{ color: 'var(--text-secondary)', lineHeight: '1.6' }}>
+                    <div>{duplicateInfo.newCardData.company || '(회사 없음)'}</div>
+                    <div>{duplicateInfo.newCardData.title || '(직함 없음)'}</div>
+                    <div>{duplicateInfo.newCardData.email || '(이메일 없음)'}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <button
+                  onClick={handleDuplicateUpdate}
+                  disabled={loading}
+                  className="btn btn-primary"
+                  style={{ 
+                    width: '100%', justifyContent: 'center', gap: '8px',
+                    padding: '14px', fontSize: '15px', fontWeight: 700, borderRadius: '12px'
+                  }}
+                >
+                  <RefreshCw size={18} />
+                  기존 명함 업데이트
+                </button>
+                <button
+                  onClick={handleDuplicateAddNew}
+                  disabled={loading}
+                  style={{ 
+                    width: '100%', padding: '14px', fontSize: '15px', fontWeight: 700, 
+                    borderRadius: '12px', border: '1px solid rgba(255,255,255,0.15)',
+                    background: 'rgba(255,255,255,0.06)', color: 'var(--text-primary)',
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', 
+                    justifyContent: 'center', gap: '8px'
+                  }}
+                >
+                  <Plus size={18} />
+                  새 명함으로 추가
+                </button>
+                <button
+                  onClick={() => setDuplicateInfo(null)}
+                  style={{ 
+                    width: '100%', padding: '10px', fontSize: '13px',
+                    background: 'none', border: 'none', color: 'var(--text-secondary)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  취소
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
