@@ -264,101 +264,122 @@ export default function CameraCapture({ onImageSelected, onBatchSelected, onClos
     }, 100);
   };
 
-  // ========== 핵심 감지 엔진 (RGB 색상 거리 기반) ==========
+  // ========== 핵심 감지 엔진 (휘도 그래디언트 + 위치 사전확률) ==========
+  // 배경/명함 색이 비슷해도 작은 명도 차만 있으면 에지를 잡아냅니다.
+  // 가이드 박스를 사전확률(Gaussian)로 사용해 텍스트 노이즈에 휘둘리지 않고
+  // 가장 명함 경계다운 에지를 선택합니다.
   const detectCardBox = (imgData, width, height) => {
     const data = imgData.data;
+    const N = width * height;
 
-    // 1. 화면 테두리 픽셀들의 평균 RGB를 배경색으로 사용
-    let bgR = 0, bgG = 0, bgB = 0, bgCount = 0;
-    
-    const sampleBorder = (x, y) => {
-      const idx = (y * width + x) * 4;
-      bgR += data[idx]; bgG += data[idx+1]; bgB += data[idx+2]; bgCount++;
-    };
-    
-    // 상단 4줄, 하단 4줄, 좌측 4열, 우측 4열에서 샘플링
-    for (let y = 0; y < 4; y++) {
-      for (let x = 0; x < width; x++) sampleBorder(x, y);
-    }
-    for (let y = height - 4; y < height; y++) {
-      for (let x = 0; x < width; x++) sampleBorder(x, y);
-    }
-    for (let y = 4; y < height - 4; y++) {
-      for (let x = 0; x < 4; x++) sampleBorder(x, y);
-      for (let x = width - 4; x < width; x++) sampleBorder(x, y);
-    }
-    
-    bgR /= bgCount; bgG /= bgCount; bgB /= bgCount;
-
-    // 2. 각 행의 배경과의 평균 RGB 색상 거리 계산
-    const rowDiff = new Float32Array(height);
-    for (let y = 0; y < height; y++) {
-      let sum = 0;
-      for (let x = 0; x < width; x++) {
-        const idx = (y * width + x) * 4;
-        const dr = data[idx] - bgR;
-        const dg = data[idx+1] - bgG;
-        const db = data[idx+2] - bgB;
-        sum += Math.sqrt(dr * dr + dg * dg + db * db);
-      }
-      rowDiff[y] = sum / width;
+    // 1. 그레이스케일(휘도) 변환
+    const gray = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      const idx = i * 4;
+      gray[i] = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
     }
 
-    // 3. 각 열의 배경과의 평균 RGB 색상 거리 계산
-    const colDiff = new Float32Array(width);
-    for (let x = 0; x < width; x++) {
-      let sum = 0;
-      for (let y = 0; y < height; y++) {
-        const idx = (y * width + x) * 4;
-        const dr = data[idx] - bgR;
-        const dg = data[idx+1] - bgG;
-        const db = data[idx+2] - bgB;
-        sum += Math.sqrt(dr * dr + dg * dg + db * db);
-      }
-      colDiff[x] = sum / height;
-    }
-
-    // 4. 동적 임계치: 25번째 백분위수 기준 (하위 25%보다 뚜렷이 높은 행/열만 선택)
-    const sortedRow = Array.from(rowDiff).sort((a, b) => a - b);
-    const sortedCol = Array.from(colDiff).sort((a, b) => a - b);
-    
-    const rowP25 = sortedRow[Math.floor(height * 0.25)];
-    const colP25 = sortedCol[Math.floor(width * 0.25)];
-    
-    // 임계치: 하위 25%값 + 전체 범위의 20% (아주 작은 차이도 잡아냄)
-    const rowRange = sortedRow[height - 1] - sortedRow[0];
-    const colRange = sortedCol[width - 1] - sortedCol[0];
-    
-    const rowThreshold = rowP25 + Math.max(rowRange * 0.20, 5);
-    const colThreshold = colP25 + Math.max(colRange * 0.20, 5);
-
-    // 5. 경계 찾기
-    let top = -1, bottom = -1, left = -1, right = -1;
+    // 2. 행/열별 그래디언트 합산
+    //    rowEdge[y] = 가로방향 에지(상/하 경계) 강도 평균
+    //    colEdge[x] = 세로방향 에지(좌/우 경계) 강도 평균
+    const xMargin = Math.max(2, Math.floor(width * 0.04));
+    const yMargin = Math.max(2, Math.floor(height * 0.04));
+    const rowEdge = new Float32Array(height);
+    const colEdge = new Float32Array(width);
 
     for (let y = 2; y < height - 2; y++) {
-      if (rowDiff[y] > rowThreshold) { top = y; break; }
+      let sum = 0;
+      const yp = (y + 2) * width;
+      const ym = (y - 2) * width;
+      for (let x = xMargin; x < width - xMargin; x++) {
+        sum += Math.abs(gray[yp + x] - gray[ym + x]);
+      }
+      rowEdge[y] = sum / (width - 2 * xMargin);
     }
-    for (let y = height - 3; y >= 2; y--) {
-      if (rowDiff[y] > rowThreshold) { bottom = y; break; }
-    }
+
     for (let x = 2; x < width - 2; x++) {
-      if (colDiff[x] > colThreshold) { left = x; break; }
-    }
-    for (let x = width - 3; x >= 2; x--) {
-      if (colDiff[x] > colThreshold) { right = x; break; }
+      let sum = 0;
+      for (let y = yMargin; y < height - yMargin; y++) {
+        sum += Math.abs(gray[y * width + (x + 2)] - gray[y * width + (x - 2)]);
+      }
+      colEdge[x] = sum / (height - 2 * yMargin);
     }
 
-    if (top < 0 || bottom < 0 || left < 0 || right < 0) return null;
+    // 3. 에지 프로파일 스무딩 (작은 텍스트/노이즈 억제)
+    const smooth = (arr) => {
+      const n = arr.length;
+      const out = new Float32Array(n);
+      for (let i = 2; i < n - 2; i++) {
+        out[i] = (arr[i - 2] + arr[i - 1] * 2 + arr[i] * 3 + arr[i + 1] * 2 + arr[i + 2]) / 9;
+      }
+      out[0] = arr[0]; out[1] = arr[1];
+      out[n - 1] = arr[n - 1]; out[n - 2] = arr[n - 2];
+      return out;
+    };
+    const rowSm = smooth(rowEdge);
+    const colSm = smooth(colEdge);
 
-    const w = right - left;
-    const h = bottom - top;
+    // 4. 가이드 박스 사전확률 (Gaussian)
+    //    명함은 사용자가 가이드 박스 안에 맞추려고 하므로, 가이드 경계 근처를 더 신뢰
+    const guideW = width * 0.82;
+    const guideH = guideW / 1.586;
+    const expectedTop = (height - guideH) / 2;
+    const expectedBottom = (height + guideH) / 2;
+    const expectedLeft = (width - guideW) / 2;
+    const expectedRight = (width + guideW) / 2;
+    const sigmaY = height * 0.22;
+    const sigmaX = width * 0.22;
+
+    const findBest = (arr, start, end, expected, sigma) => {
+      let bestIdx = -1, bestScore = -1, bestVal = 0;
+      const invTwoSigmaSq = 1 / (2 * sigma * sigma);
+      for (let i = start; i < end; i++) {
+        const d = i - expected;
+        const prior = Math.exp(-(d * d) * invTwoSigmaSq);
+        const score = arr[i] * prior;
+        if (score > bestScore) {
+          bestScore = score;
+          bestIdx = i;
+          bestVal = arr[i];
+        }
+      }
+      return { idx: bestIdx, val: bestVal };
+    };
+
+    // 5. 상/하/좌/우 경계 후보 탐색 (서로 다른 영역에서 분리해 찾음)
+    const top = findBest(rowSm, 3, Math.floor(height * 0.5), expectedTop, sigmaY);
+    const bottom = findBest(rowSm, Math.ceil(height * 0.5), height - 3, expectedBottom, sigmaY);
+    const left = findBest(colSm, 3, Math.floor(width * 0.5), expectedLeft, sigmaX);
+    const right = findBest(colSm, Math.ceil(width * 0.5), width - 3, expectedRight, sigmaX);
+
+    if (top.idx < 0 || bottom.idx < 0 || left.idx < 0 || right.idx < 0) return null;
+
+    const w = right.idx - left.idx;
+    const h = bottom.idx - top.idx;
     if (w <= 0 || h <= 0) return null;
 
-    // 6. 최소 크기만 체크 (비율 제한 매우 관대)
-    if (w > width * 0.15 && h > height * 0.10) {
-      return { x: left, y: top, w, h };
-    }
-    return null;
+    // 6. 크기 검증
+    if (w < width * 0.30 || h < height * 0.18) return null;
+
+    // 7. 종횡비 검증 (가로형 명함 1.586 기준 ±, 세로형까지 허용)
+    const aspect = w / h;
+    if (aspect < 0.55 || aspect > 2.4) return null;
+
+    // 8. 에지 강도가 주변보다 의미 있게 높은지 확인 (텍스트 라인 잡지 않게)
+    //    선택된 위치의 강도가 행/열 평균의 일정 배수 이상이어야 함
+    let rowMean = 0;
+    for (let y = 0; y < height; y++) rowMean += rowSm[y];
+    rowMean /= height;
+    let colMean = 0;
+    for (let x = 0; x < width; x++) colMean += colSm[x];
+    colMean /= width;
+
+    const rowMin = Math.max(rowMean * 1.15, 1.5);
+    const colMin = Math.max(colMean * 1.15, 1.5);
+    if (top.val < rowMin || bottom.val < rowMin) return null;
+    if (left.val < colMin || right.val < colMin) return null;
+
+    return { x: left.idx, y: top.idx, w, h };
   };
 
   const [capturedImages, setCapturedImages] = useState([]); // 배치 촬영 모드
@@ -452,7 +473,7 @@ export default function CameraCapture({ onImageSelected, onBatchSelected, onClos
   const analyzeFrameImage = (imgElement) => {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
-    const scale = 0.15;
+    const scale = 0.25;
     canvas.width = imgElement.naturalWidth * scale;
     canvas.height = imgElement.naturalHeight * scale;
     ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
