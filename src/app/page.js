@@ -369,6 +369,9 @@ export default function Home() {
         if (settings.geminiKey) {
           headers['x-gemini-key'] = settings.geminiKey;
         }
+        if (settings.anthropicKey) {
+          headers['x-anthropic-key'] = settings.anthropicKey;
+        }
 
         const ocrRes = await fetch('/api/extract', {
           method: 'POST',
