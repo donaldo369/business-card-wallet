@@ -24,10 +24,16 @@ export async function POST(req) {
     // Gemini API 초기화
     const genAI = new GoogleGenerativeAI(apiKey);
     
-    // 시도할 모델 리스트: 빠른 vision 모델 우선, 실패 시 안정적인 레거시로 폴백
-    const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    // 시도할 모델 리스트: 가용 모델만, 무료 티어 RPM 분담을 위해 다양화
+    const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
     let result = null;
     let lastError = null;
+
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const isRateLimitError = (err) => {
+      const msg = (err?.message || '').toLowerCase();
+      return msg.includes('429') || msg.includes('rate') || msg.includes('quota') || msg.includes('resource_exhausted');
+    };
 
     const prompt = `
 명함 이미지에서 정보를 추출하여 정확히 아래 형식의 JSON 구조로 반환해 주세요.
@@ -64,22 +70,33 @@ export async function POST(req) {
       },
     ];
 
-    // 자동 모델 폴백(Failover) 루프
-    for (const modelName of modelsToTry) {
-      try {
-        console.log(`Trying model: ${modelName}`);
-        const model = genAI.getGenerativeModel({
-          model: modelName,
-          generationConfig: {
-            responseMimeType: 'application/json',
-          },
-        });
-        
-        result = await model.generateContent([prompt, ...imageParts]);
-        if (result) break; // 성공 시 루프 탈출
-      } catch (err) {
-        console.warn(`${modelName} 모델 호출 실패, 다음 모델로 대체 시도합니다.`, err.message);
-        lastError = err;
+    // 자동 모델 폴백(Failover) 루프 + Rate limit 시 짧은 대기 후 재시도
+    outer: for (const modelName of modelsToTry) {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        generationConfig: {
+          responseMimeType: 'application/json',
+        },
+      });
+
+      const maxRateRetries = 3;
+      for (let attempt = 0; attempt <= maxRateRetries; attempt++) {
+        try {
+          console.log(`Trying model: ${modelName} (attempt ${attempt + 1})`);
+          result = await model.generateContent([prompt, ...imageParts]);
+          if (result) break outer;
+        } catch (err) {
+          lastError = err;
+          if (isRateLimitError(err) && attempt < maxRateRetries) {
+            // 429: 지수 백오프로 대기 후 같은 모델 재시도
+            const wait = 1000 * Math.pow(2, attempt) + Math.floor(Math.random() * 400);
+            console.warn(`${modelName} rate-limited, retrying in ${wait}ms`);
+            await sleep(wait);
+            continue;
+          }
+          console.warn(`${modelName} 모델 호출 실패, 다음 모델로 대체 시도합니다.`, err.message);
+          break; // 다음 모델로
+        }
       }
     }
 
