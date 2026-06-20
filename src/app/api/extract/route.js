@@ -163,9 +163,10 @@ export async function POST(req) {
     }
 
     if (!textResult) {
+      const dbg = `[recv geminiHdr=${!!req.headers.get('x-gemini-key')} anthropicHdr=${!!req.headers.get('x-anthropic-key')} envAnthropic=${!!process.env.ANTHROPIC_API_KEY}]`;
       const msg = anthropicKey
-        ? `모든 OCR 엔진 호출에 실패했습니다. (최종 에러: ${lastError?.message})`
-        : `Gemini 호출에 실패했고 Claude 폴백 키가 설정되지 않았습니다. (최종 에러: ${lastError?.message})`;
+        ? `모든 OCR 엔진 호출에 실패했습니다. ${dbg} (최종 에러: ${lastError?.message})`
+        : `Gemini 호출에 실패했고 Claude 폴백 키가 설정되지 않았습니다. ${dbg} (최종 에러: ${lastError?.message})`;
       throw new Error(msg);
     }
 
