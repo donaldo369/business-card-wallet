@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import Anthropic from '@anthropic-ai/sdk';
+import { autoCorrectPhones } from '@/lib/phone';
 
 const PROMPT = `
 명함 이미지에서 정보를 추출하여 정확히 아래 형식의 JSON 구조로 반환해 주세요.
@@ -194,6 +195,9 @@ export async function POST(req) {
 
     if (extractedData.last_name) extractedData.last_name = extractedData.last_name.replace(/\s+/g, '');
     if (extractedData.first_name) extractedData.first_name = extractedData.first_name.replace(/\s+/g, '');
+
+    // libphonenumber로 휴대폰/유선 분류 검증 후 자동 교정
+    autoCorrectPhones(extractedData);
 
     return NextResponse.json({ data: extractedData, engine: engineUsed });
   } catch (error) {

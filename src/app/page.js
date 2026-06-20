@@ -9,6 +9,43 @@ import {
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { getSupabaseClient } from '../lib/supabase';
+import { classifyPhone } from '../lib/phone';
+
+function PhoneTypeBadge({ phone }) {
+  const type = classifyPhone(phone);
+  if (!type || type === 'invalid') return null;
+
+  let label, bg, color;
+  if (type === 'mobile') {
+    label = '✓ 휴대폰';
+    bg = 'rgba(16, 185, 129, 0.12)';
+    color = '#34d399';
+  } else if (type === 'fixed_line') {
+    label = '✓ 사무실';
+    bg = 'rgba(99, 102, 241, 0.14)';
+    color = '#a5b4fc';
+  } else {
+    label = '분류 불가';
+    bg = 'rgba(245, 158, 11, 0.14)';
+    color = '#fbbf24';
+  }
+
+  return (
+    <span style={{
+      marginLeft: '8px',
+      padding: '2px 8px',
+      borderRadius: '999px',
+      background: bg,
+      color,
+      fontSize: '10px',
+      fontWeight: 700,
+      whiteSpace: 'nowrap',
+      verticalAlign: 'middle',
+    }}>
+      {label}
+    </span>
+  );
+}
 
 const CameraCapture = dynamic(() => import('../components/CameraCapture'), { ssr: false });
 const ImageCropper = dynamic(() => import('../components/ImageCropper'), { ssr: false });
@@ -1453,12 +1490,14 @@ export default function Home() {
                     <div className="detail-item">
                       <Phone size={14} className="color-violet" />
                       <span>휴대폰: {viewingCard.mobile_phone}</span>
+                      <PhoneTypeBadge phone={viewingCard.mobile_phone} />
                     </div>
                   )}
                   {viewingCard.office_phone && (
                     <div className="detail-item">
                       <Phone size={14} className="color-slate" />
                       <span>사무실: {viewingCard.office_phone}</span>
+                      <PhoneTypeBadge phone={viewingCard.office_phone} />
                     </div>
                   )}
                   {viewingCard.email && (
