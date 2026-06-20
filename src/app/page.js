@@ -41,6 +41,7 @@ export default function Home() {
     supabaseUrl: '',
     supabaseAnonKey: '',
     geminiKey: '',
+    anthropicKey: '',
     hubspotToken: '',
   });
 
@@ -92,12 +93,13 @@ export default function Home() {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      let savedConfig = { supabaseUrl: '', supabaseAnonKey: '', geminiKey: '', hubspotToken: '' };
+      let savedConfig = { supabaseUrl: '', supabaseAnonKey: '', geminiKey: '', anthropicKey: '', hubspotToken: '' };
       try {
         savedConfig = {
           supabaseUrl: localStorage.getItem('supabase_url') || '',
           supabaseAnonKey: localStorage.getItem('supabase_anon_key') || '',
           geminiKey: localStorage.getItem('gemini_api_key') || '',
+          anthropicKey: localStorage.getItem('anthropic_api_key') || '',
           hubspotToken: localStorage.getItem('hubspot_access_token') || '',
         };
       } catch (err) {
@@ -143,6 +145,7 @@ export default function Home() {
       localStorage.setItem('supabase_url', settings.supabaseUrl);
       localStorage.setItem('supabase_anon_key', settings.supabaseAnonKey);
       localStorage.setItem('gemini_api_key', settings.geminiKey);
+      localStorage.setItem('anthropic_api_key', settings.anthropicKey);
       localStorage.setItem('hubspot_access_token', settings.hubspotToken);
     } catch (err) {
       console.error(err);
@@ -313,6 +316,9 @@ export default function Home() {
       const headers = {};
       if (settings.geminiKey) {
         headers['x-gemini-key'] = settings.geminiKey;
+      }
+      if (settings.anthropicKey) {
+        headers['x-anthropic-key'] = settings.anthropicKey;
       }
 
       const ocrRes = await fetch('/api/extract', {
@@ -1554,7 +1560,21 @@ export default function Home() {
                     className="premium-input"
                   />
                   <p style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    명함 OCR 및 구조화 분석에 사용됩니다. (서버 환경변수 우선 적용)
+                    명함 OCR 1순위 엔진. 무료 일일 한도 소진 시 Claude로 자동 폴백됩니다. (서버 환경변수 우선)
+                  </p>
+                </div>
+
+                <div className="form-group">
+                  <label>Anthropic (Claude) API Key</label>
+                  <input
+                    type="password"
+                    placeholder="sk-ant-..."
+                    value={settings.anthropicKey}
+                    onChange={(e) => setSettings({ ...settings, anthropicKey: e.target.value })}
+                    className="premium-input"
+                  />
+                  <p style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    Gemini 한도 초과 시 자동 폴백용. Claude Haiku 4.5 사용 (명함 1장 약 4원). 비워두면 폴백 비활성화. (서버 환경변수 우선)
                   </p>
                 </div>
 
