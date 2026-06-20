@@ -312,16 +312,19 @@ export default function Home() {
     }
   };
 
-  // 배치 스캔: 여러 장의 이미지를 순차적으로 OCR 처리
+  // 배치 스캔: 여러 장의 이미지를 동시 N장씩 병렬 OCR 처리 (Gemini RPM 한도 고려해 3 고정)
   const handleBatchProcess = async (images) => {
     setShowCapture(false);
     setBatchProcessing(true);
     setBatchProgress({ current: 0, total: images.length });
     setBatchResults([]);
 
-    const results = [];
-    for (let i = 0; i < images.length; i++) {
-      setBatchProgress({ current: i + 1, total: images.length });
+    const CONCURRENCY = 3;
+    const results = new Array(images.length);
+    let completed = 0;
+    let nextIndex = 0;
+
+    const processOne = async (i) => {
       try {
         const res = await fetch(images[i]);
         const blob = await res.blob();
@@ -344,15 +347,15 @@ export default function Home() {
         const result = await ocrRes.json();
         if (!ocrRes.ok) throw new Error(result.error || 'OCR 실패');
 
-        results.push({
+        results[i] = {
           ...result.data,
           id: null,
           image_url: images[i],
           _status: 'success'
-        });
+        };
       } catch (err) {
         console.error(`이미지 ${i + 1} 처리 실패:`, err);
-        results.push({
+        results[i] = {
           name: `인식 실패 (${i + 1}번째)`,
           first_name: '', last_name: '', company: '', email: '',
           department: '', title: '', office_phone: '', mobile_phone: '', address: '',
@@ -360,9 +363,24 @@ export default function Home() {
           image_url: images[i],
           _status: 'error',
           _error: err.message
-        });
+        };
+      } finally {
+        completed += 1;
+        setBatchProgress({ current: completed, total: images.length });
       }
-    }
+    };
+
+    const worker = async () => {
+      while (true) {
+        const i = nextIndex++;
+        if (i >= images.length) return;
+        await processOne(i);
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, images.length) }, () => worker())
+    );
 
     setBatchResults(results);
     setBatchProcessing(false);
@@ -916,7 +934,7 @@ export default function Home() {
               }} />
             </div>
             <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '8px' }}>
-              {batchProgress.current}번째 명함을 분석하고 있습니다...
+              여러 장을 동시에 분석 중입니다... 잠시만 기다려 주세요.
             </p>
           </div>
         )}
