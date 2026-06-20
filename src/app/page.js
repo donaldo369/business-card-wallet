@@ -113,13 +113,23 @@ export default function Home() {
       setSupabaseReady(!!client);
 
       if (client) {
+        // 같은 사용자라면 새 객체로 갱신하지 않아 불필요한 재렌더/재로드를 막음
+        const applyUser = (nextUser) => {
+          setUser((prev) => {
+            const prevId = prev?.id || null;
+            const nextId = nextUser?.id || null;
+            if (prevId === nextId) return prev;
+            return nextUser;
+          });
+        };
+
         // 현재 세션 가져오기 및 상태 감지
         client.auth.getSession().then(({ data: { session } }) => {
-          setUser(session?.user || null);
+          applyUser(session?.user || null);
         });
 
         const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
-          setUser(session?.user || null);
+          applyUser(session?.user || null);
         });
 
         return () => subscription.unsubscribe();
@@ -228,13 +238,15 @@ export default function Home() {
     }
   }, []);
 
+  // user.id가 바뀔 때만 카드 재로드 (객체 참조만 바뀌는 토큰 갱신 등에서는 트리거되지 않음)
+  const userId = user?.id || null;
   useEffect(() => {
     if (supabaseReady) {
       loadCards();
     } else {
       setInitialLoading(false);
     }
-  }, [supabaseReady, user, loadCards]);
+  }, [supabaseReady, userId, loadCards]);
 
   const uploadImageToSupabase = async (base64Data) => {
     const sb = getSupabaseClient();
