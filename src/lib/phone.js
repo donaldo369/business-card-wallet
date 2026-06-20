@@ -1,4 +1,6 @@
-import { parsePhoneNumberFromString } from 'libphonenumber-js';
+// /max 메타데이터를 써야 getType()이 MOBILE/FIXED_LINE을 구분해서 돌려줍니다.
+// 기본 'min' 메타데이터는 검증만 가능하고 타입 정보가 빠져 있어 undefined를 반환합니다.
+import { parsePhoneNumberFromString } from 'libphonenumber-js/max';
 
 // 한 번호의 분류 결과:
 //   'mobile'     — 휴대폰 (확실)
