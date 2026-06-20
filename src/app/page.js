@@ -275,10 +275,35 @@ export default function Home() {
     return publicUrl;
   };
 
+  // 업로드 전 이미지 축소: Gemini 처리 속도 + 업로드 시간 단축 (OCR 품질 유지 위해 1280px 유지)
+  const compressForOCR = (dataUrl, maxDim = 1280, quality = 0.85) =>
+    new Promise((resolve, reject) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const longest = Math.max(img.naturalWidth, img.naturalHeight);
+        if (longest <= maxDim) {
+          resolve(dataUrl);
+          return;
+        }
+        const ratio = maxDim / longest;
+        const w = Math.round(img.naturalWidth * ratio);
+        const h = Math.round(img.naturalHeight * ratio);
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      img.src = dataUrl;
+    });
+
   const extractCardInfo = async (base64Image) => {
     setIsExtracting(true);
     try {
-      const res = await fetch(base64Image);
+      const compact = await compressForOCR(base64Image);
+      const res = await fetch(compact);
       const blob = await res.blob();
       const file = new File([blob], 'card.jpg', { type: 'image/jpeg' });
 
@@ -326,7 +351,8 @@ export default function Home() {
 
     const processOne = async (i) => {
       try {
-        const res = await fetch(images[i]);
+        const compact = await compressForOCR(images[i]);
+        const res = await fetch(compact);
         const blob = await res.blob();
         const file = new File([blob], `card_${i}.jpg`, { type: 'image/jpeg' });
 

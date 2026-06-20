@@ -24,8 +24,8 @@ export async function POST(req) {
     // Gemini API 초기화
     const genAI = new GoogleGenerativeAI(apiKey);
     
-    // 시도할 모델 리스트 (최신 모델에서 안정적인 레거시 모델 순서)
-    const modelsToTry = ['gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-1.5-flash'];
+    // 시도할 모델 리스트: 빠른 vision 모델 우선, 실패 시 안정적인 레거시로 폴백
+    const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
     let result = null;
     let lastError = null;
 
