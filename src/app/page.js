@@ -417,6 +417,8 @@ export default function Home() {
     const card = { ...batchResults[index] };
     delete card._status;
     delete card._error;
+    // 저장 성공 시 일괄 결과 목록에서 어떤 항목을 제거할지 표시
+    card._batchIndex = index;
     setEditingCard(card);
   };
 
@@ -640,6 +642,12 @@ export default function Home() {
         } else {
           alert('명함이 성공적으로 저장되었습니다.');
         }
+      }
+
+      // 일괄 스캔에서 들어온 카드라면 결과 목록에서 해당 항목 제거
+      if (typeof editingCard._batchIndex === 'number') {
+        const removedIndex = editingCard._batchIndex;
+        setBatchResults((prev) => prev.filter((_, i) => i !== removedIndex));
       }
 
       setEditingCard(null);
