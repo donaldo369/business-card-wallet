@@ -35,7 +35,6 @@ export default function Home() {
 
   // 중복 감지 상태
   const [duplicateInfo, setDuplicateInfo] = useState(null);
-  const [showHistory, setShowHistory] = useState(false); // 상세 모달에서 이력 펼치기
 
   const [settings, setSettings] = useState({
     supabaseUrl: '',
@@ -1476,6 +1475,78 @@ export default function Home() {
                   )}
                 </div>
               </div>
+
+              {/* 중복 명함 (이름 + 핸드폰 번호 동일) */}
+              {(() => {
+                const duplicates = getCardHistory(viewingCard);
+                if (duplicates.length === 0) return null;
+                return (
+                  <div style={{ marginTop: '20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                      <Sparkles size={16} className="color-violet" />
+                      <h4 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                        같은 사람의 다른 명함 ({duplicates.length}개)
+                      </h4>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {duplicates.map((dup) => (
+                        <div
+                          key={dup.id}
+                          onClick={() => setViewingCard(dup)}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '12px',
+                            padding: '10px',
+                            background: 'rgba(99, 102, 241, 0.08)',
+                            border: '1px solid rgba(99, 102, 241, 0.18)',
+                            borderRadius: '12px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={dup.image_url}
+                            alt={dup.name || '명함'}
+                            style={{
+                              width: '64px',
+                              height: '40px',
+                              objectFit: 'cover',
+                              borderRadius: '8px',
+                              border: '1px solid rgba(255, 255, 255, 0.08)',
+                              flexShrink: 0,
+                            }}
+                          />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '2px' }}>
+                              {new Date(dup.created_at).toLocaleDateString('ko-KR', {
+                                year: 'numeric',
+                                month: 'long',
+                                day: 'numeric',
+                              })}
+                            </div>
+                            <div style={{
+                              fontSize: '13px',
+                              color: 'var(--text-primary)',
+                              fontWeight: 600,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}>
+                              {dup.company || '(회사 없음)'}
+                              {dup.title ? ` · ${dup.title}` : ''}
+                              {dup.department ? ` · ${dup.department}` : ''}
+                            </div>
+                          </div>
+                          <div style={{ fontSize: '11px', color: '#6366f1', fontWeight: 600, flexShrink: 0 }}>
+                            보기 →
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="modal-footer">
