@@ -507,12 +507,15 @@ export default function Home() {
           user_id: session?.user?.id || null,
         };
 
-        // 중복 검사: 동일 이름+전화번호가 있으면 자동 업데이트
+        // 중복 검사: 동일 이름+전화번호가 있으면 이전 값을 history에 누적 후 최신 정보로 덮어쓰기
         const existing = await findDuplicate(card.name, card.mobile_phone);
         if (existing) {
+          const newHistory = [...(existing.history || []), makeHistoryEntry(existing)];
+          const updatePayload = { ...cardData, history: newHistory, updated_at: new Date().toISOString() };
+          delete updatePayload.user_id;
           const { error } = await sb
             .from('business_cards')
-            .update(cardData)
+            .update(updatePayload)
             .eq('id', existing.id);
           if (!error) updatedCount++;
         } else {
@@ -539,6 +542,19 @@ export default function Home() {
     setShowCapture(false);
     await extractCardInfo(croppedImg);
   };
+
+  // 기존 카드 값을 히스토리 엔트리로 변환 (현재 값이 새 스캔에 의해 덮히기 직전 상태)
+  const makeHistoryEntry = (existingCard) => ({
+    image_url: existingCard.image_url,
+    company: existingCard.company,
+    title: existingCard.title,
+    department: existingCard.department,
+    email: existingCard.email,
+    office_phone: existingCard.office_phone,
+    mobile_phone: existingCard.mobile_phone,
+    address: existingCard.address,
+    recorded_at: existingCard.updated_at || existingCard.created_at || new Date().toISOString(),
+  });
 
   // 중복 명함 검사: 이름 + 핸드폰 번호로 DB 조회
   const findDuplicate = async (name, mobilePhone, excludeId = null) => {
@@ -676,15 +692,21 @@ export default function Home() {
 
         alert('명함이 성공적으로 저장되었습니다.');
       } else {
-        // 새 카드 → 항상 새 레코드로 삽입 (이력 보존)
-        const { error } = await sb.from('business_cards').insert([cardData]);
-        if (error) throw error;
-
-        // 중복 존재 여부 알림
+        // 새 스캔 → 동일인(이름 + 핸드폰)이 이미 있으면 history에 이전 값 누적 후 최신 정보로 덮어쓰기
         const existing = await findDuplicate(cardData.name, cardData.mobile_phone);
         if (existing) {
-          alert(`명함이 저장되었습니다.\n${cardData.name} 님의 이전 명함 이력이 함께 보관됩니다.`);
+          const newHistory = [...(existing.history || []), makeHistoryEntry(existing)];
+          const updatePayload = { ...cardData, history: newHistory, updated_at: new Date().toISOString() };
+          delete updatePayload.user_id; // 소유자는 유지
+          const { error } = await sb
+            .from('business_cards')
+            .update(updatePayload)
+            .eq('id', existing.id);
+          if (error) throw error;
+          alert(`${cardData.name} 님의 명함이 최신 정보로 업데이트되었고 이전 버전은 히스토리에 저장되었습니다.`);
         } else {
+          const { error } = await sb.from('business_cards').insert([cardData]);
+          if (error) throw error;
           alert('명함이 성공적으로 저장되었습니다.');
         }
       }
@@ -810,19 +832,6 @@ export default function Home() {
     return Object.entries(groups);
   }, [filteredCards]);
 
-  // 특정 카드의 변경 이력 조회 (name + mobile_phone 동일)
-  const getCardHistory = (card) => {
-    if (!card || !card.name || !card.mobile_phone) return [];
-    const normalized = card.mobile_phone.replace(/[\s\-]/g, '');
-    return cards
-      .filter(c => 
-        c.id !== card.id && 
-        c.name === card.name && 
-        c.mobile_phone && 
-        c.mobile_phone.replace(/[\s\-]/g, '') === normalized
-      )
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  };
 
   return (
     <div className="app-container">
@@ -1515,41 +1524,38 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* 중복 명함 (이름 + 핸드폰 번호 동일) */}
-              {(() => {
-                const duplicates = getCardHistory(viewingCard);
-                if (duplicates.length === 0) return null;
-                return (
-                  <div style={{ marginTop: '20px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                      <Sparkles size={16} className="color-violet" />
-                      <h4 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                        같은 사람의 다른 명함 ({duplicates.length}개)
-                      </h4>
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {duplicates.map((dup) => (
+              {/* 명함 히스토리 (과거에 스캔된 같은 인물의 명함 이미지) */}
+              {viewingCard.history && viewingCard.history.length > 0 && (
+                <div style={{ marginTop: '20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                    <History size={16} className="color-violet" />
+                    <h4 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      명함 히스토리 ({viewingCard.history.length}개)
+                    </h4>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {[...viewingCard.history]
+                      .sort((a, b) => new Date(b.recorded_at || 0) - new Date(a.recorded_at || 0))
+                      .map((entry, idx) => (
                         <div
-                          key={dup.id}
-                          onClick={() => setViewingCard(dup)}
+                          key={idx}
                           style={{
                             display: 'flex',
                             alignItems: 'center',
                             gap: '12px',
                             padding: '10px',
-                            background: 'rgba(99, 102, 241, 0.08)',
-                            border: '1px solid rgba(99, 102, 241, 0.18)',
+                            background: 'rgba(99, 102, 241, 0.06)',
+                            border: '1px solid rgba(99, 102, 241, 0.14)',
                             borderRadius: '12px',
-                            cursor: 'pointer',
                           }}
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
-                            src={dup.image_url}
-                            alt={dup.name || '명함'}
+                            src={entry.image_url}
+                            alt="이전 명함"
                             style={{
-                              width: '64px',
-                              height: '40px',
+                              width: '72px',
+                              height: '46px',
                               objectFit: 'cover',
                               borderRadius: '8px',
                               border: '1px solid rgba(255, 255, 255, 0.08)',
@@ -1557,35 +1563,42 @@ export default function Home() {
                             }}
                           />
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '2px' }}>
-                              {new Date(dup.created_at).toLocaleDateString('ko-KR', {
-                                year: 'numeric',
-                                month: 'long',
-                                day: 'numeric',
-                              })}
-                            </div>
                             <div style={{
                               fontSize: '13px',
                               color: 'var(--text-primary)',
-                              fontWeight: 600,
+                              fontWeight: 700,
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
                               whiteSpace: 'nowrap',
                             }}>
-                              {dup.company || '(회사 없음)'}
-                              {dup.title ? ` · ${dup.title}` : ''}
-                              {dup.department ? ` · ${dup.department}` : ''}
+                              {entry.company || '(회사 없음)'}
                             </div>
-                          </div>
-                          <div style={{ fontSize: '11px', color: '#6366f1', fontWeight: 600, flexShrink: 0 }}>
-                            보기 →
+                            <div style={{
+                              fontSize: '12px',
+                              color: 'var(--text-secondary)',
+                              marginTop: '2px',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}>
+                              {entry.title || '(직책 없음)'}
+                              {entry.department ? ` · ${entry.department}` : ''}
+                            </div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                              {entry.recorded_at
+                                ? new Date(entry.recorded_at).toLocaleDateString('ko-KR', {
+                                    year: 'numeric',
+                                    month: 'long',
+                                    day: 'numeric',
+                                  }) + ' 등록'
+                                : '등록일 정보 없음'}
+                            </div>
                           </div>
                         </div>
                       ))}
-                    </div>
                   </div>
-                );
-              })()}
+                </div>
+              )}
             </div>
 
             <div className="modal-footer">

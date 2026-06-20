@@ -14,7 +14,9 @@ CREATE TABLE public.business_cards (
     address TEXT,
     image_url TEXT,
     hubspot_id TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+    history JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS business_cards_user_id_idx ON public.business_cards(user_id);
@@ -79,4 +81,71 @@ CREATE POLICY "Public Delete" ON storage.objects FOR DELETE USING (bucket_id = '
 --     FOR DELETE USING (auth.uid() = user_id);
 --
 -- -- 스키마 캐시 즉시 갱신 (PostgREST에게 알림)
+-- NOTIFY pgrst, 'reload schema';
+
+-- ----------------------------------------------------
+-- [명함 히스토리 컬럼 추가 — 동일인 1행 + history 누적 모델 도입]
+-- 같은 사람(이름 + 핸드폰 번호)이 여러 행으로 흩어져 있던 것을
+-- "현재 정보 1행 + 과거 스캔 N개를 JSONB로 누적" 형태로 통합합니다.
+-- 아래 블록을 순서대로 실행하세요.
+-- ----------------------------------------------------
+--
+-- -- 1) history / updated_at 컬럼 추가
+-- ALTER TABLE public.business_cards
+--     ADD COLUMN IF NOT EXISTS history JSONB NOT NULL DEFAULT '[]'::jsonb,
+--     ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+--
+-- UPDATE public.business_cards SET updated_at = created_at WHERE updated_at IS NULL;
+--
+-- -- 2) 기존 중복 행 통합 (가장 최신 행을 keeper로 남기고, 이전 행들은 history에 담아 삭제)
+-- CREATE TEMP TABLE consolidation AS
+-- SELECT
+--   bc.*,
+--   REGEXP_REPLACE(COALESCE(bc.mobile_phone, ''), '[[:space:]-]', '', 'g') AS phone_norm,
+--   ROW_NUMBER() OVER (
+--     PARTITION BY bc.user_id, bc.name,
+--                  REGEXP_REPLACE(COALESCE(bc.mobile_phone, ''), '[[:space:]-]', '', 'g')
+--     ORDER BY bc.created_at DESC
+--   ) AS rn,
+--   FIRST_VALUE(bc.id) OVER (
+--     PARTITION BY bc.user_id, bc.name,
+--                  REGEXP_REPLACE(COALESCE(bc.mobile_phone, ''), '[[:space:]-]', '', 'g')
+--     ORDER BY bc.created_at DESC
+--   ) AS keeper_id
+-- FROM public.business_cards bc
+-- WHERE bc.name IS NOT NULL
+--   AND bc.mobile_phone IS NOT NULL
+--   AND bc.mobile_phone <> '';
+--
+-- WITH history_to_add AS (
+--   SELECT
+--     keeper_id,
+--     JSONB_AGG(
+--       JSONB_BUILD_OBJECT(
+--         'image_url', image_url,
+--         'company', company,
+--         'title', title,
+--         'department', department,
+--         'email', email,
+--         'office_phone', office_phone,
+--         'mobile_phone', mobile_phone,
+--         'address', address,
+--         'recorded_at', created_at
+--       )
+--       ORDER BY created_at DESC
+--     ) AS history_data
+--   FROM consolidation
+--   WHERE rn > 1
+--   GROUP BY keeper_id
+-- )
+-- UPDATE public.business_cards bc
+-- SET history = COALESCE(bc.history, '[]'::jsonb) || hta.history_data
+-- FROM history_to_add hta
+-- WHERE bc.id = hta.keeper_id;
+--
+-- DELETE FROM public.business_cards
+-- WHERE id IN (SELECT id FROM consolidation WHERE rn > 1);
+--
+-- DROP TABLE consolidation;
+--
 -- NOTIFY pgrst, 'reload schema';
