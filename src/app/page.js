@@ -64,6 +64,7 @@ export default function Home() {
   const [isExtracting, setIsExtracting] = useState(false);
   const [editingCard, setEditingCard] = useState(null);
   const [viewingCard, setViewingCard] = useState(null);
+  const [lightboxImage, setLightboxImage] = useState(null);
 
   // 배치 스캔 상태
   const [batchProcessing, setBatchProcessing] = useState(false);
@@ -1477,7 +1478,12 @@ export default function Home() {
               {/* 이미지 풀 뷰 */}
               <div className="detail-card-preview">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={viewingCard.image_url} alt={viewingCard.name} />
+                <img
+                  src={viewingCard.image_url}
+                  alt={viewingCard.name}
+                  onClick={() => setLightboxImage(viewingCard.image_url)}
+                  style={{ cursor: 'zoom-in' }}
+                />
               </div>
 
               {/* 디테일 텍스트 */}
@@ -1553,6 +1559,7 @@ export default function Home() {
                           <img
                             src={entry.image_url}
                             alt="이전 명함"
+                            onClick={() => setLightboxImage(entry.image_url)}
                             style={{
                               width: '72px',
                               height: '46px',
@@ -1560,6 +1567,7 @@ export default function Home() {
                               borderRadius: '8px',
                               border: '1px solid rgba(255, 255, 255, 0.08)',
                               flexShrink: 0,
+                              cursor: 'zoom-in',
                             }}
                           />
                           <div style={{ flex: 1, minWidth: 0 }}>
@@ -1729,6 +1737,66 @@ export default function Home() {
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* 이미지 라이트박스 (배경 클릭하거나 X 누르면 닫힘) */}
+      {lightboxImage && (
+        <div
+          onClick={() => setLightboxImage(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 300,
+            background: 'rgba(0, 0, 0, 0.92)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '24px',
+            cursor: 'zoom-out',
+            animation: 'fadeIn 0.18s ease-out',
+          }}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setLightboxImage(null);
+            }}
+            aria-label="닫기"
+            style={{
+              position: 'absolute',
+              top: 'calc(env(safe-area-inset-top, 0px) + 16px)',
+              right: '20px',
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              border: 'none',
+              background: 'rgba(255, 255, 255, 0.12)',
+              color: '#ffffff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+            }}
+          >
+            <X size={20} />
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightboxImage}
+            alt="확대 이미지"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: '100%',
+              maxHeight: '100%',
+              objectFit: 'contain',
+              borderRadius: '12px',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
+              cursor: 'default',
+            }}
+          />
         </div>
       )}
     </div>
