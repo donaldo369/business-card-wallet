@@ -82,6 +82,11 @@ export default function Home() {
   const [editingGroupId, setEditingGroupId] = useState(null);
   const [editingGroupName, setEditingGroupName] = useState('');
 
+  // 다중 선택 모드
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedCardIds, setSelectedCardIds] = useState(new Set());
+  const [showBulkAssign, setShowBulkAssign] = useState(false);
+
   const [settings, setSettings] = useState({
     supabaseUrl: '',
     supabaseAnonKey: '',
@@ -370,6 +375,79 @@ export default function Home() {
     if (activeGroupId === id) setActiveGroupId(null);
   };
 
+  const exitSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedCardIds(new Set());
+  };
+
+  const toggleCardSelection = (cardId) => {
+    setSelectedCardIds(prev => {
+      const next = new Set(prev);
+      if (next.has(cardId)) next.delete(cardId);
+      else next.add(cardId);
+      return next;
+    });
+  };
+
+  const bulkAssignGroup = async (groupId) => {
+    const ids = Array.from(selectedCardIds);
+    if (!ids.length) return;
+    const sb = getSupabaseClient();
+    if (!sb) return;
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session?.user) return alert('로그인이 필요합니다.');
+
+    // 이미 멤버인 카드는 제외하고 추가
+    const toAdd = ids.filter(id => !(cardGroupMap[id] || []).includes(groupId));
+    if (!toAdd.length) {
+      alert('선택한 명함은 이미 이 그룹에 모두 포함되어 있습니다.');
+      return;
+    }
+    const rows = toAdd.map(card_id => ({
+      card_id, group_id: groupId, user_id: session.user.id,
+    }));
+    const { error } = await sb.from('card_group_members').insert(rows);
+    if (error) return alert(`일괄 지정 실패: ${error.message}`);
+
+    setCardGroupMap(prev => {
+      const next = { ...prev };
+      toAdd.forEach(cardId => {
+        next[cardId] = [...(next[cardId] || []), groupId];
+      });
+      return next;
+    });
+    setShowBulkAssign(false);
+    exitSelectionMode();
+  };
+
+  const bulkRemoveFromGroup = async (groupId) => {
+    const ids = Array.from(selectedCardIds);
+    const toRemove = ids.filter(id => (cardGroupMap[id] || []).includes(groupId));
+    if (!toRemove.length) {
+      alert('선택한 명함 중 이 그룹에 포함된 명함이 없습니다.');
+      return;
+    }
+    const sb = getSupabaseClient();
+    if (!sb) return;
+    const { error } = await sb
+      .from('card_group_members')
+      .delete()
+      .in('card_id', toRemove)
+      .eq('group_id', groupId);
+    if (error) return alert(`해제 실패: ${error.message}`);
+
+    setCardGroupMap(prev => {
+      const next = { ...prev };
+      toRemove.forEach(cardId => {
+        next[cardId] = (next[cardId] || []).filter(g => g !== groupId);
+        if (!next[cardId].length) delete next[cardId];
+      });
+      return next;
+    });
+    setShowBulkAssign(false);
+    exitSelectionMode();
+  };
+
   const toggleCardGroup = async (cardId, groupId) => {
     const sb = getSupabaseClient();
     if (!sb) return;
@@ -448,6 +526,15 @@ export default function Home() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [showGroupManage]);
+
+  useEffect(() => {
+    if (!showBulkAssign) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setShowBulkAssign(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showBulkAssign]);
 
   const uploadImageToSupabase = async (base64Data) => {
     const sb = getSupabaseClient();
@@ -1595,6 +1682,17 @@ export default function Home() {
                 <Settings size={12} /> 관리
               </button>
             )}
+            <button
+              type="button"
+              className={`group-chip group-chip-action ${selectionMode ? 'group-chip-active' : ''}`}
+              onClick={() => {
+                if (selectionMode) exitSelectionMode();
+                else setSelectionMode(true);
+              }}
+              title={selectionMode ? '선택 모드 종료' : '명함 다중 선택'}
+            >
+              <Check size={12} /> {selectionMode ? '선택 종료' : '선택'}
+            </button>
           </div>
 
           {initialLoading ? (
@@ -1618,8 +1716,22 @@ export default function Home() {
                     <span className="date-group-count">{groupCards.length}개</span>
                   </div>
                   <div className="cards-grid">
-                    {groupCards.map((card) => (
-                      <div key={card.id} onClick={() => setViewingCard(card)} className="glass card-item">
+                    {groupCards.map((card) => {
+                      const isSelected = selectedCardIds.has(card.id);
+                      return (
+                      <div
+                        key={card.id}
+                        onClick={() => {
+                          if (selectionMode) toggleCardSelection(card.id);
+                          else setViewingCard(card);
+                        }}
+                        className={`glass card-item ${selectionMode ? 'card-item-selectable' : ''} ${isSelected ? 'card-item-selected' : ''}`}
+                      >
+                        {selectionMode && (
+                          <div className={`card-select-indicator ${isSelected ? 'card-select-indicator-on' : ''}`}>
+                            {isSelected && <Check size={12} />}
+                          </div>
+                        )}
                         {/* 왼쪽 명함 썸네일 */}
                         <div className="card-thumb">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1668,7 +1780,8 @@ export default function Home() {
                           </div>
                         )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               ))}
@@ -1994,6 +2107,104 @@ export default function Home() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 다중 선택 액션바 */}
+      {selectionMode && (
+        <div className="selection-action-bar">
+          <div className="selection-action-bar-inner">
+            <span className="selection-count">{selectedCardIds.size}개 선택됨</span>
+            <div className="selection-action-buttons">
+              <button
+                type="button"
+                onClick={() => {
+                  if (groups.length === 0) {
+                    alert('먼저 그룹을 만들어 주세요.');
+                    return;
+                  }
+                  if (selectedCardIds.size === 0) {
+                    alert('명함을 한 개 이상 선택해 주세요.');
+                    return;
+                  }
+                  setShowBulkAssign(true);
+                }}
+                className="btn btn-primary"
+              >
+                그룹 지정
+              </button>
+              <button type="button" onClick={exitSelectionMode} className="btn btn-secondary">
+                취소
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 일괄 그룹 지정 모달 */}
+      {showBulkAssign && (
+        <div
+          className="modal-overlay"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowBulkAssign(false); }}
+        >
+          <div className="modal-content" style={{ maxWidth: '420px' }}>
+            <div className="modal-header">
+              <h3>그룹 선택 ({selectedCardIds.size}개)</h3>
+              <button onClick={() => setShowBulkAssign(false)} className="modal-close-btn">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px' }}>
+                탭하면 선택한 명함을 해당 그룹에 추가합니다. 이미 포함된 경우 제외 처리할 수도 있습니다.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {groups.map(g => {
+                  const ids = Array.from(selectedCardIds);
+                  const memberCount = ids.filter(id => (cardGroupMap[id] || []).includes(g.id)).length;
+                  const allMembers = memberCount === ids.length;
+                  return (
+                    <div
+                      key={g.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '10px 12px',
+                        borderRadius: '10px',
+                        background: 'rgba(255,255,255,0.04)',
+                      }}
+                    >
+                      <span style={{ flex: 1, fontSize: '14px' }}>{g.name}</span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                        {memberCount}/{ids.length}
+                      </span>
+                      {!allMembers && (
+                        <button
+                          type="button"
+                          onClick={() => bulkAssignGroup(g.id)}
+                          className="btn btn-primary"
+                          style={{ padding: '6px 12px', fontSize: '12px' }}
+                        >
+                          추가
+                        </button>
+                      )}
+                      {memberCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => bulkRemoveFromGroup(g.id)}
+                          className="btn btn-secondary"
+                          style={{ padding: '6px 12px', fontSize: '12px' }}
+                        >
+                          제거
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
       )}

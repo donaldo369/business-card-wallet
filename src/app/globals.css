@@ -488,6 +488,75 @@ body {
   white-space: nowrap;
 }
 
+/* Selection mode */
+.card-item-selectable {
+  position: relative;
+  cursor: pointer;
+}
+
+.card-item-selected {
+  outline: 2px solid rgba(99, 102, 241, 0.7);
+  outline-offset: -2px;
+}
+
+.card-select-indicator {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  color: #fff;
+}
+
+.card-select-indicator-on {
+  background: rgba(99, 102, 241, 0.95);
+  border-color: rgba(99, 102, 241, 0.95);
+}
+
+.selection-action-bar {
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  width: calc(100% - 32px);
+  max-width: 480px;
+  pointer-events: none;
+}
+
+.selection-action-bar-inner {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 16px;
+  background: rgba(20, 20, 28, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(12px);
+}
+
+.selection-count {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.selection-action-buttons {
+  display: flex;
+  gap: 8px;
+}
+
 /* Cards Grid */
 .cards-grid {
   display: grid;
