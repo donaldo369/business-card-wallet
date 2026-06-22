@@ -288,6 +288,33 @@ export default function Home() {
     }
   }, [supabaseReady, userId, loadCards]);
 
+  useEffect(() => {
+    if (!viewingCard) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setViewingCard(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [viewingCard]);
+
+  useEffect(() => {
+    if (!showSettings) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setShowSettings(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showSettings]);
+
+  useEffect(() => {
+    if (!lightboxImage) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setLightboxImage(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [lightboxImage]);
+
   const uploadImageToSupabase = async (base64Data) => {
     const sb = getSupabaseClient();
     if (!sb) throw new Error('Supabase가 연결되어 있지 않습니다.');
@@ -1465,7 +1492,12 @@ export default function Home() {
 
       {/* 상세 보기 모달 */}
       {viewingCard && (
-        <div className="modal-overlay">
+        <div
+          className="modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setViewingCard(null);
+          }}
+        >
           <div className="modal-content">
             <div className="modal-header">
               <h3>명함 상세 카드</h3>
@@ -1651,7 +1683,12 @@ export default function Home() {
 
       {/* 설정 모달 */}
       {showSettings && (
-        <div className="modal-overlay">
+        <div
+          className="modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowSettings(false);
+          }}
+        >
           <div className="modal-content">
             <div className="modal-header">
               <h3>시스템 연동 설정</h3>
