@@ -196,6 +196,15 @@ export async function POST(req) {
     if (extractedData.last_name) extractedData.last_name = extractedData.last_name.replace(/\s+/g, '');
     if (extractedData.first_name) extractedData.first_name = extractedData.first_name.replace(/\s+/g, '');
 
+    const ln = extractedData.last_name || '';
+    const fn = extractedData.first_name || '';
+    if (ln || fn) {
+      const isHangul = /[가-힣]/.test(ln + fn);
+      extractedData.name = isHangul ? `${ln}${fn}` : `${fn} ${ln}`.trim();
+    } else if (extractedData.name) {
+      extractedData.name = extractedData.name.replace(/\s+/g, ' ').trim();
+    }
+
     // libphonenumber로 휴대폰/유선 분류 검증 후 자동 교정
     autoCorrectPhones(extractedData);
 

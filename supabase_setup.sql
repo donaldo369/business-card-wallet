@@ -149,3 +149,33 @@ CREATE POLICY "Public Delete" ON storage.objects FOR DELETE USING (bucket_id = '
 -- DROP TABLE consolidation;
 --
 -- NOTIFY pgrst, 'reload schema';
+
+-- ----------------------------------------------------
+-- [name 컬럼 정규화 — last_name + first_name 재조합]
+-- 명함에 자간을 띄워 인쇄된 이름("복 세 현")이 name 필드에 그대로
+-- 저장된 경우를 정리합니다. 한글 이름은 붙여쓰기, 그 외(영문 등)는
+-- "first last" 순으로 띄어쓰기로 재조합합니다.
+-- ----------------------------------------------------
+
+-- 1) last_name / first_name 내부 공백 제거
+UPDATE public.business_cards
+SET
+  last_name = NULLIF(REGEXP_REPLACE(last_name, '\s+', '', 'g'), ''),
+  first_name = NULLIF(REGEXP_REPLACE(first_name, '\s+', '', 'g'), '')
+WHERE last_name ~ '\s' OR first_name ~ '\s';
+
+-- 2) name을 last_name + first_name으로 재조합
+UPDATE public.business_cards
+SET name = CASE
+  WHEN last_name ~ '[가-힣]' OR first_name ~ '[가-힣]'
+    THEN COALESCE(last_name, '') || COALESCE(first_name, '')
+  ELSE TRIM(BOTH FROM COALESCE(first_name, '') || ' ' || COALESCE(last_name, ''))
+END
+WHERE last_name IS NOT NULL OR first_name IS NOT NULL;
+
+-- 3) last_name/first_name이 모두 없는 경우, name 내 연속 공백만 정리
+UPDATE public.business_cards
+SET name = TRIM(BOTH FROM REGEXP_REPLACE(name, '\s+', ' ', 'g'))
+WHERE last_name IS NULL AND first_name IS NULL AND name ~ '\s';
+
+NOTIFY pgrst, 'reload schema';
