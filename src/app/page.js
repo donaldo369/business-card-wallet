@@ -11,6 +11,19 @@ import dynamic from 'next/dynamic';
 import { getSupabaseClient } from '../lib/supabase';
 import { classifyPhone } from '../lib/phone';
 
+const GROUP_COLORS = [
+  { key: 'violet', solid: '#a5b4fc', bg: 'rgba(99, 102, 241, 0.18)', border: 'rgba(99, 102, 241, 0.45)' },
+  { key: 'blue',   solid: '#93c5fd', bg: 'rgba(59, 130, 246, 0.18)', border: 'rgba(59, 130, 246, 0.45)' },
+  { key: 'teal',   solid: '#5eead4', bg: 'rgba(20, 184, 166, 0.18)', border: 'rgba(20, 184, 166, 0.45)' },
+  { key: 'green',  solid: '#86efac', bg: 'rgba(34, 197, 94, 0.18)',  border: 'rgba(34, 197, 94, 0.45)' },
+  { key: 'amber',  solid: '#fcd34d', bg: 'rgba(245, 158, 11, 0.18)', border: 'rgba(245, 158, 11, 0.45)' },
+  { key: 'rose',   solid: '#fda4af', bg: 'rgba(244, 63, 94, 0.18)',  border: 'rgba(244, 63, 94, 0.45)' },
+  { key: 'pink',   solid: '#f9a8d4', bg: 'rgba(236, 72, 153, 0.18)', border: 'rgba(236, 72, 153, 0.45)' },
+  { key: 'slate',  solid: '#cbd5e1', bg: 'rgba(148, 163, 184, 0.18)', border: 'rgba(148, 163, 184, 0.45)' },
+];
+const DEFAULT_GROUP_COLOR = GROUP_COLORS[0];
+const getGroupColor = (key) => GROUP_COLORS.find(c => c.key === key) || DEFAULT_GROUP_COLOR;
+
 function PhoneTypeBadge({ phone }) {
   const type = classifyPhone(phone);
   if (!type || type === 'invalid') return null;
@@ -86,6 +99,11 @@ export default function Home() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedCardIds, setSelectedCardIds] = useState(new Set());
   const [showBulkAssign, setShowBulkAssign] = useState(false);
+
+  // 그룹 생성 모달
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupColor, setNewGroupColor] = useState(DEFAULT_GROUP_COLOR.key);
 
   const [settings, setSettings] = useState({
     supabaseUrl: '',
@@ -322,7 +340,7 @@ export default function Home() {
     }
   }, []);
 
-  const createGroup = async (name) => {
+  const createGroup = async (name, color) => {
     const trimmed = (name || '').trim();
     if (!trimmed) return;
     const sb = getSupabaseClient();
@@ -331,7 +349,7 @@ export default function Home() {
     if (!session?.user) return alert('로그인이 필요합니다.');
     const { data, error } = await sb
       .from('card_groups')
-      .insert({ user_id: session.user.id, name: trimmed })
+      .insert({ user_id: session.user.id, name: trimmed, color: color || DEFAULT_GROUP_COLOR.key })
       .select()
       .single();
     if (error) {
@@ -339,6 +357,17 @@ export default function Home() {
       return;
     }
     setGroups(prev => [...prev, data]);
+  };
+
+  const setGroupColor = async (id, color) => {
+    const sb = getSupabaseClient();
+    if (!sb) return;
+    const { error } = await sb.from('card_groups').update({ color }).eq('id', id);
+    if (error) {
+      alert(`색상 변경 실패: ${error.message}`);
+      return;
+    }
+    setGroups(prev => prev.map(g => (g.id === id ? { ...g, color } : g)));
   };
 
   const renameGroup = async (id, name) => {
@@ -535,6 +564,15 @@ export default function Home() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [showBulkAssign]);
+
+  useEffect(() => {
+    if (!showCreateGroup) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setShowCreateGroup(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showCreateGroup]);
 
   const uploadImageToSupabase = async (base64Data) => {
     const sb = getSupabaseClient();
@@ -1643,16 +1681,22 @@ export default function Home() {
             >
               전체
             </button>
-            {groups.map(g => (
-              <button
-                key={g.id}
-                type="button"
-                className={`group-chip ${activeGroupId === g.id ? 'group-chip-active' : ''}`}
-                onClick={() => setActiveGroupId(g.id)}
-              >
-                {g.name}
-              </button>
-            ))}
+            {groups.map(g => {
+              const c = getGroupColor(g.color);
+              const active = activeGroupId === g.id;
+              return (
+                <button
+                  key={g.id}
+                  type="button"
+                  className={`group-chip ${active ? 'group-chip-active' : ''}`}
+                  onClick={() => setActiveGroupId(g.id)}
+                  style={active ? { background: c.bg, borderColor: c.border, color: c.solid } : undefined}
+                >
+                  <span className="group-color-dot" style={{ background: c.solid }} />
+                  {g.name}
+                </button>
+              );
+            })}
             <button
               type="button"
               className={`group-chip ${activeGroupId === 'ungrouped' ? 'group-chip-active' : ''}`}
@@ -1664,9 +1708,10 @@ export default function Home() {
             <button
               type="button"
               className="group-chip group-chip-action"
-              onClick={async () => {
-                const name = prompt('새 그룹 이름');
-                if (name) await createGroup(name);
+              onClick={() => {
+                setNewGroupName('');
+                setNewGroupColor(DEFAULT_GROUP_COLOR.key);
+                setShowCreateGroup(true);
               }}
               title="새 그룹 만들기"
             >
@@ -1767,7 +1812,16 @@ export default function Home() {
                               {(cardGroupMap[card.id] || []).map(gid => {
                                 const g = groups.find(x => x.id === gid);
                                 if (!g) return null;
-                                return <span key={gid} className="card-group-badge">{g.name}</span>;
+                                const c = getGroupColor(g.color);
+                                return (
+                                  <span
+                                    key={gid}
+                                    className="card-group-badge"
+                                    style={{ background: c.bg, color: c.solid }}
+                                  >
+                                    {g.name}
+                                  </span>
+                                );
                               })}
                             </div>
                           )}
@@ -1881,14 +1935,16 @@ export default function Home() {
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                     {groups.map(g => {
                       const active = (cardGroupMap[viewingCard.id] || []).includes(g.id);
+                      const c = getGroupColor(g.color);
                       return (
                         <button
                           key={g.id}
                           type="button"
                           className={`group-chip ${active ? 'group-chip-active' : ''}`}
                           onClick={() => toggleCardGroup(viewingCard.id, g.id)}
+                          style={active ? { background: c.bg, borderColor: c.border, color: c.solid } : undefined}
                         >
-                          {active && <Check size={12} />} {g.name}
+                          {active ? <Check size={12} /> : <span className="group-color-dot" style={{ background: c.solid }} />} {g.name}
                         </button>
                       );
                     })}
@@ -2288,10 +2344,26 @@ export default function Home() {
                         </>
                       ) : (
                         <>
+                          <span
+                            className="group-color-dot"
+                            style={{ background: getGroupColor(g.color).solid }}
+                          />
                           <span style={{ flex: 1, fontSize: '14px' }}>{g.name}</span>
                           <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
                             {Object.values(cardGroupMap).filter(arr => arr.includes(g.id)).length}개
                           </span>
+                          <div className="manage-color-swatches">
+                            {GROUP_COLORS.map(c => (
+                              <button
+                                key={c.key}
+                                type="button"
+                                onClick={() => setGroupColor(g.id, c.key)}
+                                className={`color-swatch color-swatch-sm ${g.color === c.key ? 'color-swatch-active' : ''}`}
+                                style={{ background: c.solid }}
+                                title={c.key}
+                              />
+                            ))}
+                          </div>
                           <button
                             type="button"
                             onClick={() => { setEditingGroupId(g.id); setEditingGroupName(g.name); }}
@@ -2318,13 +2390,83 @@ export default function Home() {
             <div className="modal-footer" style={{ justifyContent: 'flex-end' }}>
               <button
                 type="button"
-                onClick={async () => {
-                  const name = prompt('새 그룹 이름');
-                  if (name) await createGroup(name);
+                onClick={() => {
+                  setNewGroupName('');
+                  setNewGroupColor(DEFAULT_GROUP_COLOR.key);
+                  setShowCreateGroup(true);
                 }}
                 className="btn btn-primary"
               >
                 <Plus size={14} /> 새 그룹
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 그룹 생성 모달 */}
+      {showCreateGroup && (
+        <div
+          className="modal-overlay"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowCreateGroup(false); }}
+        >
+          <div className="modal-content" style={{ maxWidth: '380px' }}>
+            <div className="modal-header">
+              <h3>새 그룹</h3>
+              <button onClick={() => setShowCreateGroup(false)} className="modal-close-btn">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label>이름</label>
+                <input
+                  autoFocus
+                  type="text"
+                  value={newGroupName}
+                  onChange={(e) => setNewGroupName(e.target.value)}
+                  onKeyDown={async (e) => {
+                    if (e.key === 'Enter' && newGroupName.trim()) {
+                      await createGroup(newGroupName, newGroupColor);
+                      setShowCreateGroup(false);
+                    }
+                  }}
+                  placeholder="예: 고객사, VIP"
+                  className="premium-input"
+                />
+              </div>
+              <div className="form-group" style={{ marginTop: '12px' }}>
+                <label>색상</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '4px' }}>
+                  {GROUP_COLORS.map(c => (
+                    <button
+                      key={c.key}
+                      type="button"
+                      onClick={() => setNewGroupColor(c.key)}
+                      className={`color-swatch ${newGroupColor === c.key ? 'color-swatch-active' : ''}`}
+                      style={{ background: c.solid }}
+                      title={c.key}
+                    >
+                      {newGroupColor === c.key && <Check size={12} />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer" style={{ justifyContent: 'flex-end' }}>
+              <button type="button" onClick={() => setShowCreateGroup(false)} className="btn btn-secondary">
+                취소
+              </button>
+              <button
+                type="button"
+                disabled={!newGroupName.trim()}
+                onClick={async () => {
+                  await createGroup(newGroupName, newGroupColor);
+                  setShowCreateGroup(false);
+                }}
+                className="btn btn-primary"
+              >
+                만들기
               </button>
             </div>
           </div>
