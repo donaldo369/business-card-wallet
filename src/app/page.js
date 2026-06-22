@@ -74,6 +74,14 @@ export default function Home() {
   // 중복 감지 상태
   const [duplicateInfo, setDuplicateInfo] = useState(null);
 
+  // 그룹(태그) 상태
+  const [groups, setGroups] = useState([]);
+  const [cardGroupMap, setCardGroupMap] = useState({}); // {card_id: [group_id, ...]}
+  const [activeGroupId, setActiveGroupId] = useState(null); // null = 전체, 'ungrouped' = 그룹 없음
+  const [showGroupManage, setShowGroupManage] = useState(false);
+  const [editingGroupId, setEditingGroupId] = useState(null);
+  const [editingGroupName, setEditingGroupName] = useState('');
+
   const [settings, setSettings] = useState({
     supabaseUrl: '',
     supabaseAnonKey: '',
@@ -278,15 +286,129 @@ export default function Home() {
     }
   }, []);
 
+  const loadGroups = useCallback(async (client) => {
+    const sb = client || getSupabaseClient();
+    if (!sb) return;
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session?.user) {
+      setGroups([]);
+      setCardGroupMap({});
+      return;
+    }
+    try {
+      const [{ data: groupsData, error: gErr }, { data: membersData, error: mErr }] = await Promise.all([
+        sb.from('card_groups').select('*').eq('user_id', session.user.id).order('created_at', { ascending: true }),
+        sb.from('card_group_members').select('card_id, group_id').eq('user_id', session.user.id),
+      ]);
+      if (gErr) throw gErr;
+      if (mErr) throw mErr;
+      setGroups(groupsData || []);
+      const map = {};
+      (membersData || []).forEach(({ card_id, group_id }) => {
+        if (!map[card_id]) map[card_id] = [];
+        map[card_id].push(group_id);
+      });
+      setCardGroupMap(map);
+    } catch (err) {
+      // 그룹 테이블이 아직 없을 수 있음 (마이그레이션 전). 조용히 무시.
+      console.warn('그룹 로드 실패 (테이블 미생성 가능):', err.message);
+      setGroups([]);
+      setCardGroupMap({});
+    }
+  }, []);
+
+  const createGroup = async (name) => {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return;
+    const sb = getSupabaseClient();
+    if (!sb) return alert('Supabase가 연결되어 있지 않습니다.');
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session?.user) return alert('로그인이 필요합니다.');
+    const { data, error } = await sb
+      .from('card_groups')
+      .insert({ user_id: session.user.id, name: trimmed })
+      .select()
+      .single();
+    if (error) {
+      alert(`그룹 생성 실패: ${error.message}`);
+      return;
+    }
+    setGroups(prev => [...prev, data]);
+  };
+
+  const renameGroup = async (id, name) => {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return;
+    const sb = getSupabaseClient();
+    if (!sb) return;
+    const { error } = await sb.from('card_groups').update({ name: trimmed }).eq('id', id);
+    if (error) {
+      alert(`이름 변경 실패: ${error.message}`);
+      return;
+    }
+    setGroups(prev => prev.map(g => (g.id === id ? { ...g, name: trimmed } : g)));
+  };
+
+  const deleteGroup = async (id) => {
+    if (!confirm('이 그룹을 삭제하시겠습니까? 명함 자체는 삭제되지 않습니다.')) return;
+    const sb = getSupabaseClient();
+    if (!sb) return;
+    const { error } = await sb.from('card_groups').delete().eq('id', id);
+    if (error) {
+      alert(`삭제 실패: ${error.message}`);
+      return;
+    }
+    setGroups(prev => prev.filter(g => g.id !== id));
+    setCardGroupMap(prev => {
+      const next = {};
+      Object.entries(prev).forEach(([cardId, gids]) => {
+        const filtered = gids.filter(gid => gid !== id);
+        if (filtered.length) next[cardId] = filtered;
+      });
+      return next;
+    });
+    if (activeGroupId === id) setActiveGroupId(null);
+  };
+
+  const toggleCardGroup = async (cardId, groupId) => {
+    const sb = getSupabaseClient();
+    if (!sb) return;
+    const current = cardGroupMap[cardId] || [];
+    const isMember = current.includes(groupId);
+    if (isMember) {
+      const { error } = await sb
+        .from('card_group_members')
+        .delete()
+        .eq('card_id', cardId)
+        .eq('group_id', groupId);
+      if (error) return alert(`해제 실패: ${error.message}`);
+      setCardGroupMap(prev => ({
+        ...prev,
+        [cardId]: (prev[cardId] || []).filter(g => g !== groupId),
+      }));
+    } else {
+      const { data: { session } } = await sb.auth.getSession();
+      const { error } = await sb
+        .from('card_group_members')
+        .insert({ card_id: cardId, group_id: groupId, user_id: session?.user?.id });
+      if (error) return alert(`추가 실패: ${error.message}`);
+      setCardGroupMap(prev => ({
+        ...prev,
+        [cardId]: [...(prev[cardId] || []), groupId],
+      }));
+    }
+  };
+
   // user.id가 바뀔 때만 카드 재로드 (객체 참조만 바뀌는 토큰 갱신 등에서는 트리거되지 않음)
   const userId = user?.id || null;
   useEffect(() => {
     if (supabaseReady) {
       loadCards();
+      loadGroups();
     } else {
       setInitialLoading(false);
     }
-  }, [supabaseReady, userId, loadCards]);
+  }, [supabaseReady, userId, loadCards, loadGroups]);
 
   useEffect(() => {
     if (!viewingCard) return;
@@ -314,6 +436,18 @@ export default function Home() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [lightboxImage]);
+
+  useEffect(() => {
+    if (!showGroupManage) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setShowGroupManage(false);
+        setEditingGroupId(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showGroupManage]);
 
   const uploadImageToSupabase = async (base64Data) => {
     const sb = getSupabaseClient();
@@ -825,12 +959,17 @@ export default function Home() {
 
   const filteredCards = cards.filter(card => {
     const searchLower = searchQuery.toLowerCase();
-    return (
+    const matchesSearch = (
       (card.name && card.name.toLowerCase().includes(searchLower)) ||
       (card.company && card.company.toLowerCase().includes(searchLower)) ||
       (card.email && card.email.toLowerCase().includes(searchLower)) ||
       (card.mobile_phone && card.mobile_phone.includes(searchLower))
     );
+    if (!matchesSearch) return false;
+    if (activeGroupId === null) return true;
+    const memberOf = cardGroupMap[card.id] || [];
+    if (activeGroupId === 'ungrouped') return memberOf.length === 0;
+    return memberOf.includes(activeGroupId);
   });
 
   // 날짜별 그룹핑
@@ -1409,6 +1548,55 @@ export default function Home() {
             </h2>
           </div>
 
+          <div className="group-chip-row">
+            <button
+              type="button"
+              className={`group-chip ${activeGroupId === null ? 'group-chip-active' : ''}`}
+              onClick={() => setActiveGroupId(null)}
+            >
+              전체
+            </button>
+            {groups.map(g => (
+              <button
+                key={g.id}
+                type="button"
+                className={`group-chip ${activeGroupId === g.id ? 'group-chip-active' : ''}`}
+                onClick={() => setActiveGroupId(g.id)}
+              >
+                {g.name}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={`group-chip ${activeGroupId === 'ungrouped' ? 'group-chip-active' : ''}`}
+              onClick={() => setActiveGroupId('ungrouped')}
+              title="그룹 없는 명함"
+            >
+              그룹 없음
+            </button>
+            <button
+              type="button"
+              className="group-chip group-chip-action"
+              onClick={async () => {
+                const name = prompt('새 그룹 이름');
+                if (name) await createGroup(name);
+              }}
+              title="새 그룹 만들기"
+            >
+              <Plus size={12} /> 새 그룹
+            </button>
+            {groups.length > 0 && (
+              <button
+                type="button"
+                className="group-chip group-chip-action"
+                onClick={() => setShowGroupManage(true)}
+                title="그룹 관리"
+              >
+                <Settings size={12} /> 관리
+              </button>
+            )}
+          </div>
+
           {initialLoading ? (
             <div style={{ display: 'flex', justifyContent: 'center', padding: '64px 0' }}>
               <RefreshCw size={28} className="color-violet" style={{ animation: 'spin 1s infinite linear' }} />
@@ -1462,6 +1650,15 @@ export default function Home() {
                               </p>
                             )}
                           </div>
+                          {(cardGroupMap[card.id] || []).length > 0 && (
+                            <div className="card-group-badges">
+                              {(cardGroupMap[card.id] || []).map(gid => {
+                                const g = groups.find(x => x.id === gid);
+                                if (!g) return null;
+                                return <span key={gid} className="card-group-badge">{g.name}</span>;
+                              })}
+                            </div>
+                          )}
                         </div>
 
                         {/* HubSpot 상태 배지 */}
@@ -1561,6 +1758,30 @@ export default function Home() {
                   )}
                 </div>
               </div>
+
+              {/* 그룹 지정 */}
+              {groups.length > 0 && (
+                <div className="detail-info-block" style={{ marginTop: '16px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px', fontWeight: 600 }}>
+                    그룹
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {groups.map(g => {
+                      const active = (cardGroupMap[viewingCard.id] || []).includes(g.id);
+                      return (
+                        <button
+                          key={g.id}
+                          type="button"
+                          className={`group-chip ${active ? 'group-chip-active' : ''}`}
+                          onClick={() => toggleCardGroup(viewingCard.id, g.id)}
+                        >
+                          {active && <Check size={12} />} {g.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* 명함 히스토리 (과거에 스캔된 같은 인물의 명함 이미지) */}
               {viewingCard.history && viewingCard.history.length > 0 && (
@@ -1773,6 +1994,128 @@ export default function Home() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 그룹 관리 모달 */}
+      {showGroupManage && (
+        <div
+          className="modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowGroupManage(false);
+              setEditingGroupId(null);
+            }
+          }}
+        >
+          <div className="modal-content" style={{ maxWidth: '480px' }}>
+            <div className="modal-header">
+              <h3>그룹 관리</h3>
+              <button
+                onClick={() => { setShowGroupManage(false); setEditingGroupId(null); }}
+                className="modal-close-btn"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="modal-body">
+              {groups.length === 0 ? (
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px', textAlign: 'center', padding: '24px 0' }}>
+                  아직 그룹이 없습니다.
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {groups.map(g => (
+                    <div
+                      key={g.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '10px 12px',
+                        borderRadius: '10px',
+                        background: 'rgba(255,255,255,0.04)',
+                      }}
+                    >
+                      {editingGroupId === g.id ? (
+                        <>
+                          <input
+                            autoFocus
+                            value={editingGroupName}
+                            onChange={(e) => setEditingGroupName(e.target.value)}
+                            onKeyDown={async (e) => {
+                              if (e.key === 'Enter') {
+                                await renameGroup(g.id, editingGroupName);
+                                setEditingGroupId(null);
+                              } else if (e.key === 'Escape') {
+                                setEditingGroupId(null);
+                              }
+                            }}
+                            className="premium-input"
+                            style={{ flex: 1 }}
+                          />
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await renameGroup(g.id, editingGroupName);
+                              setEditingGroupId(null);
+                            }}
+                            className="btn btn-primary"
+                            style={{ padding: '6px 10px', fontSize: '12px' }}
+                          >
+                            저장
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingGroupId(null)}
+                            className="btn btn-secondary"
+                            style={{ padding: '6px 10px', fontSize: '12px' }}
+                          >
+                            취소
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <span style={{ flex: 1, fontSize: '14px' }}>{g.name}</span>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                            {Object.values(cardGroupMap).filter(arr => arr.includes(g.id)).length}개
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => { setEditingGroupId(g.id); setEditingGroupName(g.name); }}
+                            className="btn btn-secondary"
+                            style={{ padding: '6px 10px', fontSize: '12px' }}
+                          >
+                            <Edit3 size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteGroup(g.id)}
+                            className="btn btn-danger"
+                            style={{ padding: '6px 10px', fontSize: '12px' }}
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="modal-footer" style={{ justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={async () => {
+                  const name = prompt('새 그룹 이름');
+                  if (name) await createGroup(name);
+                }}
+                className="btn btn-primary"
+              >
+                <Plus size={14} /> 새 그룹
+              </button>
+            </div>
           </div>
         </div>
       )}

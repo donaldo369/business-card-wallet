@@ -179,3 +179,54 @@ SET name = TRIM(BOTH FROM REGEXP_REPLACE(name, '\s+', ' ', 'g'))
 WHERE last_name IS NULL AND first_name IS NULL AND name ~ '\s';
 
 NOTIFY pgrst, 'reload schema';
+
+-- ----------------------------------------------------
+-- [그룹(태그) 기능 추가]
+-- card_groups: 사용자별 그룹 정의
+-- card_group_members: 명함 ↔ 그룹 N:N 매핑
+-- ----------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.card_groups (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+    name TEXT NOT NULL,
+    color TEXT,
+    created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
+    UNIQUE (user_id, name)
+);
+
+CREATE INDEX IF NOT EXISTS card_groups_user_id_idx ON public.card_groups(user_id);
+
+ALTER TABLE public.card_groups ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can read own groups" ON public.card_groups
+    FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own groups" ON public.card_groups
+    FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update own groups" ON public.card_groups
+    FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can delete own groups" ON public.card_groups
+    FOR DELETE USING (auth.uid() = user_id);
+
+
+CREATE TABLE IF NOT EXISTS public.card_group_members (
+    card_id UUID REFERENCES public.business_cards(id) ON DELETE CASCADE NOT NULL,
+    group_id UUID REFERENCES public.card_groups(id) ON DELETE CASCADE NOT NULL,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
+    PRIMARY KEY (card_id, group_id)
+);
+
+CREATE INDEX IF NOT EXISTS card_group_members_user_id_idx ON public.card_group_members(user_id);
+CREATE INDEX IF NOT EXISTS card_group_members_group_id_idx ON public.card_group_members(group_id);
+
+ALTER TABLE public.card_group_members ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can read own group members" ON public.card_group_members
+    FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own group members" ON public.card_group_members
+    FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can delete own group members" ON public.card_group_members
+    FOR DELETE USING (auth.uid() = user_id);
+
+NOTIFY pgrst, 'reload schema';

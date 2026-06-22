@@ -423,6 +423,71 @@ body {
   color: var(--text-muted);
 }
 
+/* Group Chips */
+.group-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.group-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.group-chip:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.group-chip-active {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(99, 102, 241, 0.45);
+  color: #c7d2fe;
+}
+
+.group-chip-action {
+  background: transparent;
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.group-chip-action:hover {
+  color: #a5b4fc;
+  border-color: rgba(99, 102, 241, 0.45);
+}
+
+/* Card group badges (on card item) */
+.card-group-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.card-group-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(99, 102, 241, 0.14);
+  color: #a5b4fc;
+  white-space: nowrap;
+}
+
 /* Cards Grid */
 .cards-grid {
   display: grid;
