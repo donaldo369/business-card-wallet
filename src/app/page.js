@@ -2,10 +2,10 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
-  Settings, Search, Plus, Check, Mail, Phone, MapPin, 
-  Building2, ExternalLink, Trash2, Edit3, 
+  Settings, Search, Plus, Check, Mail, Phone, MapPin,
+  Building2, ExternalLink, Trash2, Edit3,
   Save, X, FileText, Sparkles, AlertCircle, RefreshCw, Smartphone, History, ChevronDown,
-  LogIn, LogOut, User, Lock
+  LogIn, LogOut, User, Lock, Download
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { getSupabaseClient } from '../lib/supabase';
@@ -62,6 +62,39 @@ function PhoneTypeBadge({ phone }) {
 
 const CameraCapture = dynamic(() => import('../components/CameraCapture'), { ssr: false });
 const ImageCropper = dynamic(() => import('../components/ImageCropper'), { ssr: false });
+const ZoomableImage = dynamic(() => import('../components/ZoomableImage'), { ssr: false });
+
+const saveImageToDevice = async (src) => {
+  if (!src) return;
+  try {
+    const res = await fetch(src);
+    const blob = await res.blob();
+    const ext = (blob.type && blob.type.split('/')[1]) || 'jpg';
+    const fileName = `business-card-${Date.now()}.${ext === 'jpeg' ? 'jpg' : ext}`;
+    const file = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
+
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: '명함 이미지' });
+        return;
+      } catch (err) {
+        if (err && err.name === 'AbortError') return;
+      }
+    }
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (err) {
+    console.error('이미지 저장 실패:', err);
+    alert('이미지를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+  }
+};
 
 export default function Home() {
   const [cards, setCards] = useState([]);
@@ -2492,44 +2525,89 @@ export default function Home() {
             animation: 'fadeIn 0.18s ease-out',
           }}
         >
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setLightboxImage(null);
-            }}
-            aria-label="닫기"
+          <div
             style={{
               position: 'absolute',
               top: 'calc(env(safe-area-inset-top, 0px) + 16px)',
               right: '20px',
-              width: '40px',
-              height: '40px',
-              borderRadius: '50%',
-              border: 'none',
-              background: 'rgba(255, 255, 255, 0.12)',
-              color: '#ffffff',
+              display: 'flex',
+              gap: '10px',
+              zIndex: 2,
+            }}
+          >
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                saveImageToDevice(lightboxImage);
+              }}
+              aria-label="이미지 저장"
+              title="앨범에 저장"
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '50%',
+                border: 'none',
+                background: 'rgba(255, 255, 255, 0.12)',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+              }}
+            >
+              <Download size={18} />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setLightboxImage(null);
+              }}
+              aria-label="닫기"
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '50%',
+                border: 'none',
+                background: 'rgba(255, 255, 255, 0.12)',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+              }}
+            >
+              <X size={20} />
+            </button>
+          </div>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              height: '100%',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              cursor: 'pointer',
             }}
           >
-            <X size={20} />
-          </button>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={lightboxImage}
-            alt="확대 이미지"
-            onClick={(e) => e.stopPropagation()}
+            <ZoomableImage src={lightboxImage} alt="확대 이미지" />
+          </div>
+          <div
             style={{
-              maxWidth: '100%',
-              maxHeight: '100%',
-              objectFit: 'contain',
-              borderRadius: '12px',
-              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
-              cursor: 'default',
+              position: 'absolute',
+              bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              fontSize: '11px',
+              color: 'rgba(255, 255, 255, 0.55)',
+              background: 'rgba(0, 0, 0, 0.35)',
+              padding: '6px 12px',
+              borderRadius: '999px',
+              pointerEvents: 'none',
+              whiteSpace: 'nowrap',
             }}
-          />
+          >
+            두 손가락으로 확대 · 더블탭으로 줌
+          </div>
         </div>
       )}
     </div>
