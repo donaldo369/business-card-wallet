@@ -29,6 +29,13 @@ const PROMPT = `
 }
 `;
 
+const DUAL_SIDE_HINT = `
+추가 지시: 이 요청에는 두 개의 이미지가 제공됩니다. 첫 번째는 명함의 앞면, 두 번째는 뒷면입니다.
+두 면의 정보를 종합하여 하나의 JSON으로 반환해 주세요.
+동일 필드가 양쪽에 다르게 있으면 앞면의 값을 우선합니다.
+어느 한 쪽에만 있는 정보는 반드시 결과에 포함하세요.
+`;
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const isRateLimitError = (err) => {
@@ -48,14 +55,17 @@ let geminiDeadUntil = 0;
 const GEMINI_DEAD_CACHE_MS = 5 * 60 * 1000;
 
 // Gemini 호출: quota 소진 시 즉시 포기, 일시적 429만 짧게 재시도.
-async function tryGemini({ apiKey, base64Image, mimeType }) {
+async function tryGemini({ apiKey, images }) {
   if (Date.now() < geminiDeadUntil) {
     return { error: new Error('Gemini quota cached as exhausted; skipping') };
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
-  const imageParts = [{ inlineData: { data: base64Image, mimeType } }];
+  const imageParts = images.map(({ base64, mimeType }) => ({
+    inlineData: { data: base64, mimeType },
+  }));
+  const promptText = images.length > 1 ? `${PROMPT}\n${DUAL_SIDE_HINT}` : PROMPT;
   let lastError = null;
 
   for (const modelName of modelsToTry) {
@@ -68,8 +78,8 @@ async function tryGemini({ apiKey, base64Image, mimeType }) {
     let modelDone = false;
     for (let attempt = 0; attempt <= maxRateRetries && !modelDone; attempt++) {
       try {
-        console.log(`Gemini ${modelName} (attempt ${attempt + 1})`);
-        const result = await model.generateContent([PROMPT, ...imageParts]);
+        console.log(`Gemini ${modelName} (attempt ${attempt + 1}, images=${images.length})`);
+        const result = await model.generateContent([promptText, ...imageParts]);
         return { text: result.response.text(), engine: `gemini:${modelName}` };
       } catch (err) {
         lastError = err;
@@ -94,10 +104,15 @@ async function tryGemini({ apiKey, base64Image, mimeType }) {
 }
 
 // Claude Haiku 4.5 폴백. Vision + 텍스트 프롬프트로 동일한 JSON 추출.
-async function tryClaude({ apiKey, base64Image, mimeType }) {
+async function tryClaude({ apiKey, images }) {
   const client = new Anthropic({ apiKey });
   try {
-    console.log('Claude Haiku 4.5 fallback');
+    console.log(`Claude Haiku 4.5 fallback (images=${images.length})`);
+    const imageBlocks = images.map(({ base64, mimeType }) => ({
+      type: 'image',
+      source: { type: 'base64', media_type: mimeType, data: base64 },
+    }));
+    const promptText = images.length > 1 ? `${PROMPT}\n${DUAL_SIDE_HINT}` : PROMPT;
     const response = await client.messages.create({
       model: 'claude-haiku-4-5',
       max_tokens: 2048,
@@ -105,13 +120,10 @@ async function tryClaude({ apiKey, base64Image, mimeType }) {
         {
           role: 'user',
           content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: mimeType, data: base64Image },
-            },
+            ...imageBlocks,
             {
               type: 'text',
-              text: `${PROMPT}\n\nJSON만 반환하고 다른 설명이나 코드블록 표시는 포함하지 마세요.`,
+              text: `${promptText}\n\nJSON만 반환하고 다른 설명이나 코드블록 표시는 포함하지 마세요.`,
             },
           ],
         },
@@ -159,12 +171,23 @@ export async function POST(req) {
     const base64Image = Buffer.from(bytes).toString('base64');
     const mimeType = file.type || 'image/jpeg';
 
+    const images = [{ base64: base64Image, mimeType }];
+
+    const backFile = formData.get('image_back');
+    if (backFile && typeof backFile !== 'string') {
+      const backBytes = await backFile.arrayBuffer();
+      images.push({
+        base64: Buffer.from(backBytes).toString('base64'),
+        mimeType: backFile.type || 'image/jpeg',
+      });
+    }
+
     let textResult = null;
     let engineUsed = null;
     let lastError = null;
 
     if (geminiKey) {
-      const r = await tryGemini({ apiKey: geminiKey, base64Image, mimeType });
+      const r = await tryGemini({ apiKey: geminiKey, images });
       if (r.text) {
         textResult = r.text;
         engineUsed = r.engine;
@@ -175,7 +198,7 @@ export async function POST(req) {
 
     if (!textResult && anthropicKey) {
       console.log('Falling back to Claude');
-      const r = await tryClaude({ apiKey: anthropicKey, base64Image, mimeType });
+      const r = await tryClaude({ apiKey: anthropicKey, images });
       if (r.text) {
         textResult = r.text;
         engineUsed = r.engine;
