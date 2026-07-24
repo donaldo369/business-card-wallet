@@ -13,6 +13,7 @@ CREATE TABLE public.business_cards (
     mobile_phone TEXT,
     address TEXT,
     image_url TEXT,
+    back_image_url TEXT,
     hubspot_id TEXT,
     history JSONB NOT NULL DEFAULT '[]'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
@@ -228,5 +229,15 @@ CREATE POLICY "Users can insert own group members" ON public.card_group_members
     FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Users can delete own group members" ON public.card_group_members
     FOR DELETE USING (auth.uid() = user_id);
+
+NOTIFY pgrst, 'reload schema';
+
+-- ----------------------------------------------------
+-- [뒷면 이미지 컬럼 추가 — 양면 스캔 기능 도입]
+-- 기존 테이블에는 아래 블록을 SQL Editor에서 실행하세요.
+-- ----------------------------------------------------
+
+ALTER TABLE public.business_cards
+    ADD COLUMN IF NOT EXISTS back_image_url TEXT;
 
 NOTIFY pgrst, 'reload schema';
