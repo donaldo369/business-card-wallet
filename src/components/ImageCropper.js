@@ -11,17 +11,17 @@ export default function ImageCropper({ imageSrc, onCropComplete, onCancel }) {
   const [loading, setLoading] = useState(false);
   const [autoDetecting, setAutoDetecting] = useState(false);
 
-  // 캔버스 기반 간단한 명함 경계 자동 감지 함수
+  // 캔버스 기반 명함 경계 자동 감지
+  // 카드 주변에 균일한 배경이 있을 때만 신뢰. 명함이 프레임을 꽉 채우면 null 반환.
   const detectCardBoundaries = (imgElement) => {
     try {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       if (!ctx) return null;
 
-      // 빠른 연산을 위해 해상도 축소
       const scale = 0.2;
-      canvas.width = imgElement.naturalWidth * scale;
-      canvas.height = imgElement.naturalHeight * scale;
+      canvas.width = Math.max(1, Math.floor(imgElement.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.floor(imgElement.naturalHeight * scale));
       ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
 
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -29,91 +29,92 @@ export default function ImageCropper({ imageSrc, onCropComplete, onCancel }) {
       const width = canvas.width;
       const height = canvas.height;
 
-      // 1. 네 귀퉁이(모서리)의 평균 배경색 구하기
       const getPixel = (x, y) => {
         const idx = (y * width + x) * 4;
-        return { r: data[idx], g: data[idx+1], b: data[idx+2] };
+        return { r: data[idx], g: data[idx + 1], b: data[idx + 2] };
       };
-      
-      const corners = [getPixel(0, 0), getPixel(width-1, 0), getPixel(0, height-1), getPixel(width-1, height-1)];
+      const colorDist = (c1, c2) =>
+        Math.sqrt((c1.r - c2.r) ** 2 + (c1.g - c2.g) ** 2 + (c1.b - c2.b) ** 2);
+
+      // 1. 이미지 테두리 전체에서 여러 점을 샘플링하여 배경색 추정
+      const perimeter = [];
+      const samplesPerSide = 12;
+      for (let i = 0; i < samplesPerSide; i++) {
+        const t = (i + 0.5) / samplesPerSide;
+        const px = Math.min(width - 1, Math.floor(t * width));
+        const py = Math.min(height - 1, Math.floor(t * height));
+        perimeter.push(getPixel(px, 0));
+        perimeter.push(getPixel(px, height - 1));
+        perimeter.push(getPixel(0, py));
+        perimeter.push(getPixel(width - 1, py));
+      }
+
       const avgBg = {
-        r: corners.reduce((acc, c) => acc + c.r, 0) / 4,
-        g: corners.reduce((acc, c) => acc + c.g, 0) / 4,
-        b: corners.reduce((acc, c) => acc + c.b, 0) / 4,
+        r: perimeter.reduce((s, p) => s + p.r, 0) / perimeter.length,
+        g: perimeter.reduce((s, p) => s + p.g, 0) / perimeter.length,
+        b: perimeter.reduce((s, p) => s + p.b, 0) / perimeter.length,
       };
 
-      // 색상 차이 계산 함수
-      const colorDist = (c1, c2) => {
-        return Math.sqrt(Math.pow(c1.r - c2.r, 2) + Math.pow(c1.g - c2.g, 2) + Math.pow(c1.b - c2.b, 2));
-      };
+      // 2. 신뢰도 검사 — 테두리 색이 일관되지 않으면 카드가 프레임을 꽉 채운 것으로 간주하고 감지 포기
+      const avgDeviation =
+        perimeter.reduce((s, p) => s + colorDist(p, avgBg), 0) / perimeter.length;
+      if (avgDeviation > 25) return null;
 
-      // 2. 바깥쪽에서 안쪽으로 탐색하며 경계(Edge) 감지
-      const threshold = 35; // 배경과의 최소 색상 차이 임계값
+      // 3. 바깥쪽에서 안쪽으로 스캔하여 첫 배경 이탈 지점 찾기
+      const threshold = 40;
       let top = 0, bottom = height - 1, left = 0, right = width - 1;
 
-      // Top 탐색
       for (let y = 0; y < height; y++) {
-        let edgeFound = false;
+        let found = false;
         for (let x = 0; x < width; x++) {
-          if (colorDist(getPixel(x, y), avgBg) > threshold) {
-            top = y;
-            edgeFound = true;
-            break;
-          }
+          if (colorDist(getPixel(x, y), avgBg) > threshold) { top = y; found = true; break; }
         }
-        if (edgeFound) break;
+        if (found) break;
       }
-
-      // Bottom 탐색
       for (let y = height - 1; y >= 0; y--) {
-        let edgeFound = false;
+        let found = false;
         for (let x = 0; x < width; x++) {
-          if (colorDist(getPixel(x, y), avgBg) > threshold) {
-            bottom = y;
-            edgeFound = true;
-            break;
-          }
+          if (colorDist(getPixel(x, y), avgBg) > threshold) { bottom = y; found = true; break; }
         }
-        if (edgeFound) break;
+        if (found) break;
       }
-
-      // Left 탐색
       for (let x = 0; x < width; x++) {
-        let edgeFound = false;
+        let found = false;
         for (let y = 0; y < height; y++) {
-          if (colorDist(getPixel(x, y), avgBg) > threshold) {
-            left = x;
-            edgeFound = true;
-            break;
-          }
+          if (colorDist(getPixel(x, y), avgBg) > threshold) { left = x; found = true; break; }
         }
-        if (edgeFound) break;
+        if (found) break;
       }
-
-      // Right 탐색
       for (let x = width - 1; x >= 0; x--) {
-        let edgeFound = false;
+        let found = false;
         for (let y = 0; y < height; y++) {
-          if (colorDist(getPixel(x, y), avgBg) > threshold) {
-            right = x;
-            edgeFound = true;
-            break;
-          }
+          if (colorDist(getPixel(x, y), avgBg) > threshold) { right = x; found = true; break; }
         }
-        if (edgeFound) break;
+        if (found) break;
       }
 
-      // 감지 범위가 너무 작거나 유효하지 않은 경우 안전장치
-      if (right - left < width * 0.2 || bottom - top < height * 0.2) {
-        return null;
-      }
+      const detectedW = right - left;
+      const detectedH = bottom - top;
 
-      // 3. 원본 이미지 해상도로 변환하여 반환
+      // 4. 감지된 영역이 이미지의 40% 미만이면 카드가 아니라 내부 텍스트를 감싼 것 → 포기
+      const areaRatio = (detectedW * detectedH) / (width * height);
+      if (areaRatio < 0.4) return null;
+      if (detectedW < width * 0.5 || detectedH < height * 0.5) return null;
+
+      // 5. 안전 여백 3%를 추가하여 가장자리 잘림 방지
+      const padX = width * 0.03;
+      const padY = height * 0.03;
+      const finalLeft = Math.max(0, left - padX);
+      const finalTop = Math.max(0, top - padY);
+      const finalRight = Math.min(width - 1, right + padX);
+      const finalBottom = Math.min(height - 1, bottom + padY);
+
+      // 원본 해상도 좌표로 환산
       return {
-        left: (left / scale),
-        top: (top / scale),
-        width: ((right - left) / scale),
-        height: ((bottom - top) / scale)
+        left: finalLeft / scale,
+        top: finalTop / scale,
+        width: (finalRight - finalLeft) / scale,
+        height: (finalBottom - finalTop) / scale,
       };
     } catch (e) {
       console.error('Auto detection error:', e);
@@ -124,10 +125,10 @@ export default function ImageCropper({ imageSrc, onCropComplete, onCancel }) {
   useEffect(() => {
     if (imageRef.current) {
       cropperRef.current = new Cropper(imageRef.current, {
-        aspectRatio: 1.586, // 신용카드 / 명함 표준 비율
+        // 자유 비율 — 사진 각도나 카드 형태가 표준과 달라도 잘림 없이 조절 가능
         viewMode: 1,
         dragMode: 'move',
-        autoCropArea: 0.9,
+        autoCropArea: 1,
         restore: false,
         guides: true,
         center: true,
@@ -136,20 +137,20 @@ export default function ImageCropper({ imageSrc, onCropComplete, onCancel }) {
         cropBoxResizable: true,
         toggleDragModeOnDblclick: false,
         ready() {
-          // 크로퍼 준비 완료 시 자동 명함 영역 감지 실행
           setAutoDetecting(true);
           const detected = detectCardBoundaries(imageRef.current);
           if (detected) {
-            // 감지된 영역으로 크롭 상자 위치 변경 및 스냅
-            cropperRef.current.setCropBoxData({
-              left: detected.left,
-              top: detected.top,
+            // setData는 원본 이미지 좌표계를 사용 (setCropBoxData는 컨테이너 좌표계)
+            cropperRef.current.setData({
+              x: detected.left,
+              y: detected.top,
               width: detected.width,
-              height: detected.height
+              height: detected.height,
             });
           }
+          // 감지 실패 시에는 autoCropArea: 1 로 이미 전체 이미지가 선택되어 있음
           setAutoDetecting(false);
-        }
+        },
       });
     }
 
@@ -191,11 +192,11 @@ export default function ImageCropper({ imageSrc, onCropComplete, onCancel }) {
     if (cropperRef.current && imageRef.current) {
       const detected = detectCardBoundaries(imageRef.current);
       if (detected) {
-        cropperRef.current.setCropBoxData({
-          left: detected.left,
-          top: detected.top,
+        cropperRef.current.setData({
+          x: detected.left,
+          y: detected.top,
           width: detected.width,
-          height: detected.height
+          height: detected.height,
         });
       } else {
         alert('명함 테두리를 감지할 수 없습니다. 수동으로 조절해 주세요.');
