@@ -3,7 +3,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Image as ImageIcon, MoreHorizontal, X, Zap, ZapOff } from 'lucide-react';
 
-export default function CameraCapture({ onImageSelected, onBatchSelected, onClose, onManualInput }) {
+export default function CameraCapture({ onImageSelected, onBatchSelected, onDualSideSelected, onClose, onManualInput }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null); // 실시간 오버레이 캔버스
   const fileInputRef = useRef(null);
@@ -82,6 +82,10 @@ export default function CameraCapture({ onImageSelected, onBatchSelected, onClos
   // 이전 프레임의 감지 결과를 저장하여 떨림 방지 (temporal smoothing)
   const prevBoxRef = useRef(null);
   const [debugInfo, setDebugInfo] = useState('');
+
+  const [captureMode, setCaptureMode] = useState('single'); // 'single' | 'dual'
+  const [dualStage, setDualStage] = useState('front'); // 'front' | 'back'
+  const [dualFront, setDualFront] = useState(null); // dual 모드에서 앞면 캡처 후 저장
 
   // 실시간 명함 영역 경계선 감지 루프
   const startLiveDetection = () => {
@@ -420,6 +424,18 @@ export default function CameraCapture({ onImageSelected, onBatchSelected, onClos
     }
 
     const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+
+    if (captureMode === 'dual') {
+      if (dualStage === 'front') {
+        setDualFront(dataUrl);
+        setDualStage('back');
+      } else {
+        stopCamera();
+        onDualSideSelected(dualFront, dataUrl);
+      }
+      return;
+    }
+
     setCapturedImages(prev => [...prev, dataUrl]);
   };
 
@@ -460,13 +476,26 @@ export default function CameraCapture({ onImageSelected, onBatchSelected, onClos
             }
 
             const croppedDataUrl = canvas.toDataURL('image/jpeg', 0.95);
+
+            if (captureMode === 'dual') {
+              if (dualStage === 'front') {
+                setDualFront(croppedDataUrl);
+                setDualStage('back');
+                // 카메라 유지: 사용자가 뒷면을 이어서 촬영/선택
+              } else {
+                stopCamera();
+                onDualSideSelected(dualFront, croppedDataUrl);
+              }
+              return;
+            }
+
+            stopCamera();
             onImageSelected(croppedDataUrl);
           };
           img.src = event.target.result;
         }
       };
       reader.readAsDataURL(file);
-      stopCamera();
     }
   };
 
@@ -505,7 +534,7 @@ export default function CameraCapture({ onImageSelected, onBatchSelected, onClos
       }}
     >
       {/* 상단 제어 바 */}
-      <div 
+      <div
         style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -515,14 +544,53 @@ export default function CameraCapture({ onImageSelected, onBatchSelected, onClos
           zIndex: 110
         }}
       >
-        <button 
-          onClick={toggleFlash} 
+        <button
+          onClick={toggleFlash}
           style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer', padding: '8px' }}
         >
           {flashOn ? <Zap size={22} className="color-violet" /> : <ZapOff size={22} />}
         </button>
-        <button 
-          onClick={() => { stopCamera(); onClose(); }} 
+        <div
+          style={{
+            display: 'flex',
+            gap: '4px',
+            background: 'rgba(255,255,255,0.08)',
+            borderRadius: '999px',
+            padding: '3px',
+          }}
+        >
+          {['single', 'dual'].map((mode) => {
+            const active = captureMode === mode;
+            const canSwitch = capturedImages.length === 0 && !dualFront;
+            return (
+              <button
+                key={mode}
+                onClick={() => {
+                  if (!canSwitch) return;
+                  setCaptureMode(mode);
+                  setDualStage('front');
+                  setDualFront(null);
+                }}
+                disabled={!canSwitch}
+                style={{
+                  padding: '6px 14px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  color: active ? '#0f172a' : 'rgba(255,255,255,0.8)',
+                  background: active ? '#ffffff' : 'transparent',
+                  border: 'none',
+                  borderRadius: '999px',
+                  cursor: canSwitch ? 'pointer' : 'not-allowed',
+                  opacity: canSwitch ? 1 : 0.5,
+                }}
+              >
+                {mode === 'single' ? '단면' : '양면'}
+              </button>
+            );
+          })}
+        </div>
+        <button
+          onClick={() => { stopCamera(); onClose(); }}
           style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer', padding: '8px' }}
         >
           <X size={24} />
@@ -579,7 +647,7 @@ export default function CameraCapture({ onImageSelected, onBatchSelected, onClos
             />
             
             {/* 감지 상태 표시 */}
-            <div 
+            <div
               style={{
                 position: 'absolute',
                 bottom: '24px',
@@ -597,14 +665,16 @@ export default function CameraCapture({ onImageSelected, onBatchSelected, onClos
                 whiteSpace: 'nowrap'
               }}
             >
-              {debugInfo || '초기화 중...'}
+              {captureMode === 'dual'
+                ? (dualStage === 'front' ? '① 앞면 촬영' : '② 이제 뒷면 촬영')
+                : (debugInfo || '초기화 중...')}
             </div>
           </>
         )}
       </div>
 
       {/* 촬영된 이미지 썸네일 스트립 (배치 모드) */}
-      {capturedImages.length > 0 && (
+      {captureMode === 'single' && capturedImages.length > 0 && (
         <div
           style={{
             display: 'flex',
