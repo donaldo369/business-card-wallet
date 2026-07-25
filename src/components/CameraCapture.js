@@ -455,6 +455,7 @@ export default function CameraCapture({ onImageSelected, onBatchSelected, onDual
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
+    if (e.target) e.target.value = ''; // reset so same file can be re-picked
     if (file) {
       const reader = new FileReader();
       reader.onload = (event) => {

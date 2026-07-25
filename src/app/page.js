@@ -844,6 +844,7 @@ export default function Home() {
           const newHistory = [...(existing.history || []), makeHistoryEntry(existing)];
           const updatePayload = { ...cardData, history: newHistory, updated_at: new Date().toISOString() };
           delete updatePayload.user_id;
+          delete updatePayload.back_image_url; // 배치는 단면만이므로 기존 뒷면 이미지 유지
           const { error } = await sb
             .from('business_cards')
             .update(updatePayload)
@@ -887,7 +888,6 @@ export default function Home() {
       setCroppedImage(finalFront);
       setSelectedImage(null);
       setDualPending(null);
-      setShowCapture(false);
       await extractCardInfo(finalFront, finalBack);
       return;
     }
