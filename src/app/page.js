@@ -2024,6 +2024,18 @@ export default function Home() {
                 />
               </div>
 
+              {viewingCard.back_image_url && (
+                <div className="detail-card-preview" style={{ marginTop: '12px' }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={viewingCard.back_image_url}
+                    alt={`${viewingCard.name} 뒷면`}
+                    onClick={() => setLightboxImage(viewingCard.back_image_url)}
+                    style={{ cursor: 'zoom-in' }}
+                  />
+                </div>
+              )}
+
               {/* 디테일 텍스트 */}
               <div className="detail-info-block">
                 <div className="detail-title-section">
