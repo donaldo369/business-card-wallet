@@ -105,6 +105,7 @@ export default function Home() {
   const [showSettings, setShowSettings] = useState(false);
   const [showCapture, setShowCapture] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
+  const [dualPending, setDualPending] = useState(null); // { front, back, croppedFront } | null
   const [croppedImage, setCroppedImage] = useState(null);
   
   const [isExtracting, setIsExtracting] = useState(false);
@@ -865,7 +866,32 @@ export default function Home() {
     setLoading(false);
   };
 
+  const handleDualSideSelected = (frontImg, backImg) => {
+    setShowCapture(false);
+    setDualPending({ front: frontImg, back: backImg, croppedFront: null });
+    setSelectedImage(frontImg); // 앞면 크로퍼 오픈
+  };
+
   const handleCropComplete = async (croppedImg) => {
+    if (dualPending) {
+      if (!dualPending.croppedFront) {
+        // 앞면 트림 완료 → 뒷면 크로퍼로 이어짐
+        setDualPending({ ...dualPending, croppedFront: croppedImg });
+        setSelectedImage(dualPending.back);
+        return;
+      }
+      // 뒷면 트림 완료 → 통합 OCR
+      const finalFront = dualPending.croppedFront;
+      const finalBack = croppedImg;
+      setCroppedImage(finalFront);
+      setSelectedImage(null);
+      setDualPending(null);
+      setShowCapture(false);
+      await extractCardInfo(finalFront, finalBack);
+      return;
+    }
+
+    // 단면 흐름 (기존 동작)
     setCroppedImage(croppedImg);
     setSelectedImage(null);
     setShowCapture(false);
@@ -1297,13 +1323,14 @@ export default function Home() {
 
           {/* 촬영 및 스캔 가이드 */}
           {showCapture && (
-            <CameraCapture 
+            <CameraCapture
               onImageSelected={async (src) => {
                 setShowCapture(false);
                 await extractCardInfo(src);
               }}
               onBatchSelected={handleBatchProcess}
               onClose={() => setShowCapture(false)}
+              onDualSideSelected={handleDualSideSelected}
               onManualInput={() => {
                 setShowCapture(false);
                 setEditingCard({
@@ -1892,7 +1919,20 @@ export default function Home() {
         <ImageCropper
           imageSrc={selectedImage}
           onCropComplete={handleCropComplete}
-          onCancel={() => setSelectedImage(null)}
+          onCancel={() => {
+            if (dualPending) {
+              // 양면 흐름 중단: 모든 상태를 초기화하고 카메라 재진입 유도
+              setDualPending(null);
+              setSelectedImage(null);
+            } else {
+              setSelectedImage(null);
+            }
+          }}
+          stageLabel={
+            dualPending
+              ? (dualPending.croppedFront ? '뒷면 트림' : '앞면 트림')
+              : undefined
+          }
         />
       )}
 
