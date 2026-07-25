@@ -5,7 +5,7 @@ import Cropper from 'cropperjs';
 import 'cropperjs/dist/cropper.css';
 import { Crop, X, RefreshCw, Sparkles } from 'lucide-react';
 
-export default function ImageCropper({ imageSrc, onCropComplete, onCancel }) {
+export default function ImageCropper({ imageSrc, onCropComplete, onCancel, stageLabel }) {
   const imageRef = useRef(null);
   const cropperRef = useRef(null);
   const [loading, setLoading] = useState(false);
@@ -211,7 +211,7 @@ export default function ImageCropper({ imageSrc, onCropComplete, onCancel }) {
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800/80">
           <h3 className="text-base font-semibold text-slate-200 flex items-center gap-2">
             <Sparkles size={16} className="text-violet-400" />
-            명함 영역 자동 맞춤
+            {stageLabel || '명함 영역 자동 맞춤'}
           </h3>
           <button
             onClick={onCancel}
