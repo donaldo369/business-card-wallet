@@ -658,7 +658,7 @@ export default function Home() {
       img.src = dataUrl;
     });
 
-  const extractCardInfo = async (base64Image) => {
+  const extractCardInfo = async (base64Image, backBase64 = null) => {
     setIsExtracting(true);
     try {
       const compact = await compressForOCR(base64Image);
@@ -668,6 +668,14 @@ export default function Home() {
 
       const formData = new FormData();
       formData.append('image', file);
+
+      if (backBase64) {
+        const backCompact = await compressForOCR(backBase64);
+        const backRes = await fetch(backCompact);
+        const backBlob = await backRes.blob();
+        const backFile = new File([backBlob], 'card_back.jpg', { type: 'image/jpeg' });
+        formData.append('image_back', backFile);
+      }
 
       const headers = {};
       if (settings.geminiKey) {
@@ -689,7 +697,8 @@ export default function Home() {
       setEditingCard({
         ...result.data,
         id: null,
-        image_url: base64Image
+        image_url: base64Image,
+        back_image_url: backBase64,
       });
     } catch (err) {
       console.error(err);
