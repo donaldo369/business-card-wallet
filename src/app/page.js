@@ -1607,15 +1607,68 @@ export default function Home() {
                 <div className="form-image-container">
                   <div className="biz-card-sim" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '8px', background: '#000' }}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img 
-                      src={editingCard.image_url} 
-                      alt="Cropped card" 
+                    <img
+                      src={editingCard.image_url}
+                      alt="Cropped card front"
                       style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '8px' }}
                     />
                   </div>
                   <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', marginTop: '12px', letterSpacing: '0.05em' }}>
-                    트림 완료된 명함 이미지
+                    앞면
                   </span>
+
+                  {editingCard.back_image_url && (
+                    <>
+                      <div
+                        className="biz-card-sim"
+                        style={{
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '8px',
+                          background: '#000',
+                          marginTop: '16px',
+                          position: 'relative',
+                        }}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={editingCard.back_image_url}
+                          alt="Cropped card back"
+                          style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '8px' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditingCard({ ...editingCard, back_image_url: null })
+                          }
+                          style={{
+                            position: 'absolute',
+                            top: '6px',
+                            right: '6px',
+                            width: '24px',
+                            height: '24px',
+                            borderRadius: '50%',
+                            background: 'rgba(0,0,0,0.7)',
+                            border: '1px solid rgba(255,255,255,0.2)',
+                            color: '#fff',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: 0,
+                          }}
+                          aria-label="뒷면 제거"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                      <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', marginTop: '12px', letterSpacing: '0.05em' }}>
+                        뒷면
+                      </span>
+                    </>
+                  )}
                 </div>
 
                 {/* 오른쪽 폼 입력 영역 */}
