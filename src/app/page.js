@@ -834,6 +834,7 @@ export default function Home() {
           mobile_phone: card.mobile_phone,
           address: card.address,
           image_url: finalImageUrl,
+          back_image_url: null,
           user_id: session?.user?.id || null,
         };
 
@@ -901,6 +902,7 @@ export default function Home() {
   // 기존 카드 값을 히스토리 엔트리로 변환 (현재 값이 새 스캔에 의해 덮히기 직전 상태)
   const makeHistoryEntry = (existingCard) => ({
     image_url: existingCard.image_url,
+    back_image_url: existingCard.back_image_url || null,
     company: existingCard.company,
     title: existingCard.title,
     department: existingCard.department,
@@ -1010,9 +1012,13 @@ export default function Home() {
     setLoading(true);
     try {
       let finalImageUrl = editingCard.image_url;
-
       if (editingCard.image_url.startsWith('data:')) {
         finalImageUrl = await uploadImageToSupabase(editingCard.image_url);
+      }
+
+      let finalBackImageUrl = editingCard.back_image_url || null;
+      if (finalBackImageUrl && finalBackImageUrl.startsWith('data:')) {
+        finalBackImageUrl = await uploadImageToSupabase(finalBackImageUrl);
       }
 
       const { data: { session } } = await sb.auth.getSession();
@@ -1028,6 +1034,7 @@ export default function Home() {
         mobile_phone: editingCard.mobile_phone,
         address: editingCard.address,
         image_url: finalImageUrl,
+        back_image_url: finalBackImageUrl,
         user_id: session?.user?.id || null,
       };
 
