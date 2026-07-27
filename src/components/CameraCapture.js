@@ -540,7 +540,7 @@ export default function CameraCapture({ onImageSelected, onBatchSelected, onDual
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          padding: '16px 20px',
+          padding: 'calc(env(safe-area-inset-top, 0px) + 16px) calc(env(safe-area-inset-right, 0px) + 20px) 16px calc(env(safe-area-inset-left, 0px) + 20px)',
           background: 'rgba(0,0,0,0.6)',
           zIndex: 110
         }}
@@ -746,12 +746,12 @@ export default function CameraCapture({ onImageSelected, onBatchSelected, onDual
       )}
 
       {/* 하단 제어 바 (사진첩, 셔터, 다른수단 구조) */}
-      <div 
+      <div
         style={{
           display: 'flex',
           justifyContent: 'space-around',
           alignItems: 'center',
-          padding: '28px 20px 48px 20px',
+          padding: '28px calc(env(safe-area-inset-right, 0px) + 20px) calc(env(safe-area-inset-bottom, 0px) + 24px) calc(env(safe-area-inset-left, 0px) + 20px)',
           background: 'rgba(0,0,0,0.85)',
           zIndex: 110
         }}
