@@ -47,6 +47,19 @@ export async function POST(req) {
       address: address || '',
     };
 
+    const patchExisting = async (existingId) => {
+      const patchRes = await fetch(`https://api.hubapi.com/crm/v3/objects/contacts/${existingId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${hubspotToken}`,
+        },
+        body: JSON.stringify({ properties }),
+      });
+      const patchResult = await patchRes.json();
+      return { ok: patchRes.ok, status: patchRes.status, result: patchResult };
+    };
+
     let response;
     let url;
 
@@ -75,6 +88,29 @@ export async function POST(req) {
     }
 
     const result = await response.json();
+
+    // 신규 등록 시도 중 "이미 존재" 응답을 받으면, 응답에서 기존 ID를 추출해 PATCH로 대체.
+    // HubSpot 메시지 예: "Contact already exists. Existing ID: 476110062308"
+    if (!response.ok && !hubspot_id) {
+      const message = result?.message || '';
+      const existingId = message.match(/Existing ID:\s*(\d+)/i)?.[1];
+      if (existingId) {
+        console.log(`[HubSpot Sync] Contact already exists (id=${existingId}); patching instead of creating.`);
+        const patched = await patchExisting(existingId);
+        if (patched.ok) {
+          return NextResponse.json({ success: true, id: existingId, merged: true });
+        }
+        console.error(`HubSpot PATCH after conflict failed [${patched.status}]:`, patched.result);
+        return NextResponse.json(
+          {
+            error: patched.result?.message || 'HubSpot 기존 연락처 업데이트에 실패했습니다.',
+            id: existingId,
+            merged: false,
+          },
+          { status: patched.status }
+        );
+      }
+    }
 
     if (!response.ok) {
       console.error(`HubSpot API error [${response.status}]:`, result);

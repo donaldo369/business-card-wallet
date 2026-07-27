@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useState, useEffect } from 'react';
-import { Image as ImageIcon, MoreHorizontal, X, Zap, ZapOff } from 'lucide-react';
+import { Image as ImageIcon, FileText, X, Zap, ZapOff } from 'lucide-react';
 
 export default function CameraCapture({ onImageSelected, onBatchSelected, onDualSideSelected, onClose, onManualInput }) {
   const videoRef = useRef(null);
@@ -820,8 +820,8 @@ export default function CameraCapture({ onImageSelected, onBatchSelected, onDual
           />
         </button>
 
-        {/* 오른쪽: 다른 수단 (직접 입력) */}
-        <button 
+        {/* 오른쪽: 텍스트로 입력 (AI가 텍스트에서 자동 인식) */}
+        <button
           onClick={() => { stopCamera(); onManualInput(); }}
           style={{
             display: 'flex',
@@ -837,7 +837,7 @@ export default function CameraCapture({ onImageSelected, onBatchSelected, onDual
             width: '60px'
           }}
         >
-          <div 
+          <div
             style={{
               width: '42px',
               height: '42px',
@@ -848,9 +848,9 @@ export default function CameraCapture({ onImageSelected, onBatchSelected, onDual
               justifyContent: 'center'
             }}
           >
-            <MoreHorizontal size={20} />
+            <FileText size={20} />
           </div>
-          다른 수단
+          텍스트 입력
         </button>
       </div>
 

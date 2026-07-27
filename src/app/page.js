@@ -104,6 +104,8 @@ export default function Home() {
   
   const [showSettings, setShowSettings] = useState(false);
   const [showCapture, setShowCapture] = useState(false);
+  const [showTextInput, setShowTextInput] = useState(false);
+  const [textInputValue, setTextInputValue] = useState('');
   const [selectedImage, setSelectedImage] = useState(null);
   const [dualPending, setDualPending] = useState(null); // { front, back, croppedFront } | null
   const [croppedImage, setCroppedImage] = useState(null);
@@ -709,6 +711,44 @@ export default function Home() {
     }
   };
 
+  // 텍스트에서 명함 정보 추출: 사용자가 붙여넣은 텍스트 → /api/extract-text → 편집 폼
+  const extractCardFromText = async (rawText) => {
+    const text = (rawText || '').trim();
+    if (!text) {
+      alert('텍스트를 입력해 주세요.');
+      return;
+    }
+    setIsExtracting(true);
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (settings.geminiKey) headers['x-gemini-key'] = settings.geminiKey;
+      if (settings.anthropicKey) headers['x-anthropic-key'] = settings.anthropicKey;
+
+      const res = await fetch('/api/extract-text', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ text }),
+      });
+
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || '텍스트 추출에 실패했습니다.');
+
+      setShowTextInput(false);
+      setTextInputValue('');
+      setEditingCard({
+        ...result.data,
+        id: null,
+        image_url: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="%231e293b"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%2364748b" font-family="sans-serif" font-size="12">텍스트 입력</text></svg>',
+        back_image_url: null,
+      });
+    } catch (err) {
+      console.error(err);
+      alert(err.message);
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
   // 배치 스캔: 여러 장의 이미지를 동시 N장씩 병렬 OCR 처리 (Gemini RPM 한도 고려해 3 고정)
   const handleBatchProcess = async (images) => {
     setShowCapture(false);
@@ -1141,14 +1181,20 @@ export default function Home() {
           .from('business_cards')
           .update({ hubspot_id: result.id })
           .eq('id', card.id);
-        
+
         if (viewingCard && viewingCard.id === card.id) {
           setViewingCard(prev => ({ ...prev, hubspot_id: result.id }));
         }
         loadCards();
       }
 
-      alert('HubSpot 연락처에 정상적으로 등록되었습니다!');
+      if (result.merged) {
+        alert('이미 HubSpot에 등록된 연락처를 찾았습니다. 최신 정보로 업데이트하고 연결했습니다.');
+      } else if (card.hubspot_id) {
+        alert('HubSpot 연락처가 최신 정보로 업데이트되었습니다.');
+      } else {
+        alert('HubSpot 연락처에 정상적으로 등록되었습니다!');
+      }
     } catch (err) {
       console.error(err);
       alert(`HubSpot 연동 오류: ${err.message}`);
@@ -1318,6 +1364,14 @@ export default function Home() {
               <Plus size={18} />
               <span>새 명함 추가</span>
             </button>
+            <button
+              onClick={() => { setTextInputValue(''); setShowTextInput(true); }}
+              className="btn btn-secondary btn-add"
+              title="텍스트에서 AI로 인식"
+            >
+              <FileText size={18} />
+              <span>텍스트 입력</span>
+            </button>
             <input
               type="file"
               ref={fileInputRef}
@@ -1340,22 +1394,84 @@ export default function Home() {
               onDualSideSelected={handleDualSideSelected}
               onManualInput={() => {
                 setShowCapture(false);
-                setEditingCard({
-                  id: null,
-                  name: '',
-                  first_name: '',
-                  last_name: '',
-                  company: '',
-                  email: '',
-                  department: '',
-                  title: '',
-                  office_phone: '',
-                  mobile_phone: '',
-                  address: '',
-                  image_url: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="%231e293b"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%2364748b" font-family="sans-serif" font-size="12">수동 입력</text></svg>'
-                });
+                setTextInputValue('');
+                setShowTextInput(true);
               }}
             />
+          )}
+
+          {/* 텍스트 입력 모달: 붙여넣은 텍스트에서 AI가 필드를 추출 */}
+          {showTextInput && (
+            <div
+              className="modal-overlay"
+              onClick={(e) => {
+                if (e.target === e.currentTarget && !isExtracting) {
+                  setShowTextInput(false);
+                }
+              }}
+            >
+              <div className="modal-content" style={{ maxWidth: '520px', width: '100%' }}>
+                <div className="modal-header">
+                  <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <FileText size={18} className="color-violet" />
+                    텍스트로 명함 입력
+                  </h3>
+                  <button
+                    onClick={() => !isExtracting && setShowTextInput(false)}
+                    className="modal-close-btn"
+                    disabled={isExtracting}
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+                <div className="modal-body">
+                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px', lineHeight: 1.5 }}>
+                    이메일 서명, 채팅 메시지 등에서 복사한 명함 정보를 붙여넣으세요. AI가 이름·회사·연락처 등을 자동으로 인식해 채워 넣습니다.
+                  </p>
+                  <div className="form-group">
+                    <textarea
+                      autoFocus
+                      value={textInputValue}
+                      onChange={(e) => setTextInputValue(e.target.value)}
+                      placeholder={'예)\n홍길동 부장\n어쿠스틱 이엔지\n02-1234-5678\n010-9876-5432\nhong@acoustic.co.kr\n서울시 강남구 테헤란로 123'}
+                      className="premium-input"
+                      rows={10}
+                      style={{
+                        width: '100%',
+                        resize: 'vertical',
+                        minHeight: '180px',
+                        fontFamily: 'system-ui, -apple-system, sans-serif',
+                        lineHeight: 1.5,
+                      }}
+                      disabled={isExtracting}
+                    />
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', textAlign: 'right' }}>
+                      {textInputValue.length} / 8000
+                    </div>
+                  </div>
+                </div>
+                <div className="modal-footer" style={{ justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowTextInput(false)}
+                    className="btn btn-secondary"
+                    disabled={isExtracting}
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!textInputValue.trim() || isExtracting}
+                    onClick={() => extractCardFromText(textInputValue)}
+                    className="btn btn-primary"
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <Sparkles size={14} />
+                    {isExtracting ? '분석 중...' : 'AI로 인식'}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
 
           {/* OCR 데이터 파싱 중 로딩 상태 (단일) */}
