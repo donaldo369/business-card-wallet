@@ -154,6 +154,7 @@ export default function Home() {
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const fileInputRef = useRef(null);
+  const editFormRef = useRef(null);
 
   const handleAddNewCard = () => {
     const isMobile = typeof navigator !== 'undefined' && /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -242,6 +243,13 @@ export default function Home() {
       }
     }
   }, []);
+
+  // 카메라/파일/텍스트 입력으로 편집 폼이 열리면 자동으로 폼 위치로 스크롤 (모바일에서 페이지 하단에 렌더되기 때문에 필요)
+  useEffect(() => {
+    if (editingCard && !isExtracting && editFormRef.current) {
+      editFormRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [editingCard, isExtracting]);
 
   const handleSaveSettings = (e) => {
     e.preventDefault();
@@ -1700,7 +1708,7 @@ export default function Home() {
 
         {/* 명함 정보 상세 입력 및 교정 (OCR 완료 후) */}
         {editingCard && !isExtracting && (
-          <div className="glass" style={{ padding: '28px' }}>
+          <div ref={editFormRef} className="glass" style={{ padding: '28px', scrollMarginTop: '24px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
               <h3 className="section-title">
                 <Sparkles size={18} className="color-violet" />
