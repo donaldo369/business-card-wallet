@@ -4,12 +4,13 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Settings, Search, Plus, Check, Mail, Phone, MapPin,
   Building2, ExternalLink, Trash2, Edit3,
-  Save, X, FileText, Sparkles, AlertCircle, RefreshCw, Smartphone, History, ChevronDown,
-  LogIn, LogOut, User, Lock, Download
+  Save, X, FileText, Sparkles, AlertCircle, RefreshCw, Smartphone, History,
+  LogOut, User, Download
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { getSupabaseClient } from '../lib/supabase';
 import { useToast } from '../components/Toast';
+import AuthPanel from '../components/AuthPanel';
 import { classifyPhone } from '../lib/phone';
 
 const GROUP_COLORS = [
@@ -1326,55 +1327,15 @@ export default function Home() {
 
       {/* 로그인 화면 */}
       {supabaseReady && !user && !initialLoading && (
-        <div className="glass auth-container" style={{ margin: '40px auto', maxWidth: '400px', width: '100%', padding: '32px' }}>
-          <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-            <div style={{ display: 'inline-flex', padding: '12px', background: 'rgba(99, 102, 241, 0.1)', borderRadius: '16px', marginBottom: '12px', color: 'var(--primary)' }}>
-              <Lock size={28} />
-            </div>
-            <h2 style={{ fontSize: '20px', fontWeight: 800 }}>개인 명함첩 로그인</h2>
-            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-              이메일 주소로 로그인하여 안전하게 명함을 관리하세요.
-            </p>
-          </div>
-
-          <form onSubmit={handleAuthSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div className="form-group">
-              <label>이메일 주소</label>
-              <input
-                type="email"
-                required
-                value={authEmail}
-                onChange={(e) => setAuthEmail(e.target.value)}
-                placeholder="example@email.com"
-                className="premium-input"
-              />
-            </div>
-            <div className="form-group">
-              <label>비밀번호</label>
-              <input
-                type="password"
-                required
-                value={authPassword}
-                onChange={(e) => setAuthPassword(e.target.value)}
-                placeholder="••••••••"
-                className="premium-input"
-              />
-            </div>
-
-            <button type="submit" disabled={loading} className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '14px', borderRadius: '14px', marginTop: '8px' }}>
-              {loading ? (
-                <RefreshCw size={16} style={{ animation: 'spin 1s infinite linear' }} />
-              ) : (
-                <>
-                  <LogIn size={16} style={{ marginRight: '8px' }} />
-                  <span>로그인</span>
-                </>
-              )}
-            </button>
-          </form>
-        </div>
+        <AuthPanel
+          email={authEmail}
+          password={authPassword}
+          loading={loading}
+          onEmailChange={setAuthEmail}
+          onPasswordChange={setAuthPassword}
+          onSubmit={handleAuthSubmit}
+        />
       )}
-
       {/* 메인 콘텐츠 영역 (로그인 완료 시 노출) */}
       {user && (
         <main style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
