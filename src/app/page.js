@@ -20,6 +20,7 @@ import SettingsModal from '../components/SettingsModal';
 import GroupManageModal from '../components/GroupManageModal';
 import CreateGroupModal from '../components/CreateGroupModal';
 import BulkAssignModal from '../components/BulkAssignModal';
+import Sheet from '../components/Sheet';
 import { DEFAULT_GROUP_COLOR, getGroupColor } from '../lib/groupColors';
 import { classifyPhone } from '../lib/phone';
 
@@ -1375,55 +1376,17 @@ export default function Home() {
 
           {/* 텍스트 입력 모달: 붙여넣은 텍스트에서 AI가 필드를 추출 */}
           {showTextInput && (
-            <div
-              className="modal-overlay"
-              onClick={(e) => {
-                if (e.target === e.currentTarget && !isExtracting) {
-                  setShowTextInput(false);
-                }
-              }}
-            >
-              <div className="modal-content" style={{ maxWidth: '520px', width: '100%' }}>
-                <div className="modal-header">
-                  <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <FileText size={18} className="color-violet" />
-                    텍스트로 명함 입력
-                  </h3>
-                  <button
-                    onClick={() => !isExtracting && setShowTextInput(false)}
-                    className="modal-close-btn"
-                    disabled={isExtracting}
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-                <div className="modal-body">
-                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px', lineHeight: 1.5 }}>
-                    이메일 서명, 채팅 메시지 등에서 복사한 명함 정보를 붙여넣으세요. AI가 이름·회사·연락처 등을 자동으로 인식해 채워 넣습니다.
-                  </p>
-                  <div className="form-group">
-                    <textarea
-                      autoFocus
-                      value={textInputValue}
-                      onChange={(e) => setTextInputValue(e.target.value)}
-                      placeholder={'예)\n홍길동 부장\n어쿠스틱 이엔지\n02-1234-5678\n010-9876-5432\nhong@acoustic.co.kr\n서울시 강남구 테헤란로 123'}
-                      className="premium-input"
-                      rows={10}
-                      style={{
-                        width: '100%',
-                        resize: 'vertical',
-                        minHeight: '180px',
-                        fontFamily: 'system-ui, -apple-system, sans-serif',
-                        lineHeight: 1.5,
-                      }}
-                      disabled={isExtracting}
-                    />
-                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', textAlign: 'right' }}>
-                      {textInputValue.length} / 8000
-                    </div>
-                  </div>
-                </div>
-                <div className="modal-footer" style={{ justifyContent: 'flex-end' }}>
+            <Sheet
+              title={(
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <FileText size={18} className="color-violet" />
+                  텍스트로 명함 입력
+                </span>
+              )}
+              onClose={() => { if (!isExtracting) setShowTextInput(false); }}
+              maxWidth="520px"
+              footer={(
+                <>
                   <button
                     type="button"
                     onClick={() => setShowTextInput(false)}
@@ -1442,9 +1405,34 @@ export default function Home() {
                     <Sparkles size={14} />
                     {isExtracting ? '분석 중...' : 'AI로 인식'}
                   </button>
+                </>
+              )}
+            >
+              <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px', lineHeight: 1.5 }}>
+                이메일 서명, 채팅 메시지 등에서 복사한 명함 정보를 붙여넣으세요. AI가 이름·회사·연락처 등을 자동으로 인식해 채워 넣습니다.
+              </p>
+              <div className="form-group">
+                <textarea
+                  autoFocus
+                  value={textInputValue}
+                  onChange={(e) => setTextInputValue(e.target.value)}
+                  placeholder={'예)\n홍길동 부장\n어쿠스틱 이엔지\n02-1234-5678\n010-9876-5432\nhong@acoustic.co.kr\n서울시 강남구 테헤란로 123'}
+                  className="premium-input"
+                  rows={10}
+                  style={{
+                    width: '100%',
+                    resize: 'vertical',
+                    minHeight: '180px',
+                    fontFamily: 'system-ui, -apple-system, sans-serif',
+                    lineHeight: 1.5,
+                  }}
+                  disabled={isExtracting}
+                />
+                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', textAlign: 'right' }}>
+                  {textInputValue.length} / 8000
                 </div>
               </div>
-            </div>
+            </Sheet>
           )}
 
           {/* OCR 데이터 파싱 중 로딩 상태 (단일) */}
