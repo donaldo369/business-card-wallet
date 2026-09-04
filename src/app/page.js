@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { getSupabaseClient } from '../lib/supabase';
+import { useToast } from '../components/Toast';
 import { classifyPhone } from '../lib/phone';
 
 const GROUP_COLORS = [
@@ -92,11 +93,12 @@ const saveImageToDevice = async (src) => {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   } catch (err) {
     console.error('이미지 저장 실패:', err);
-    alert('이미지를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    throw new Error('이미지를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.');
   }
 };
 
 export default function Home() {
+  const { toast, confirm } = useToast();
   const [cards, setCards] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -269,14 +271,14 @@ export default function Home() {
       localStorage.setItem('hubspot_access_token', settings.hubspotToken);
     } catch (err) {
       console.error(err);
-      alert('쿠키 및 로컬 저장소가 차단되어 설정을 저장할 수 없습니다.');
+      toast.error('쿠키 및 로컬 저장소가 차단되어 설정을 저장할 수 없습니다.');
     }
     
     const client = getSupabaseClient({ url: settings.supabaseUrl, anonKey: settings.supabaseAnonKey });
     setSupabaseReady(!!client);
     setShowSettings(false);
     
-    alert('설정이 안전하게 저장되었습니다.');
+    toast.success('설정이 안전하게 저장되었습니다.');
     if (client) {
       loadCards(client);
     }
@@ -286,7 +288,7 @@ export default function Home() {
     e.preventDefault();
     const sb = getSupabaseClient();
     if (!sb) {
-      alert('Supabase 연결 설정이 필요합니다.');
+      toast.error('Supabase 연결 설정이 필요합니다.');
       return;
     }
 
@@ -300,7 +302,7 @@ export default function Home() {
       setUser(data.user);
       setAuthPassword('');
     } catch (err) {
-      alert(`인증 실패: ${err.message}`);
+      toast.error(`인증 실패: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -396,16 +398,16 @@ export default function Home() {
     const trimmed = (name || '').trim();
     if (!trimmed) return;
     const sb = getSupabaseClient();
-    if (!sb) return alert('Supabase가 연결되어 있지 않습니다.');
+    if (!sb) { toast.error('Supabase가 연결되어 있지 않습니다.'); return; }
     const { data: { session } } = await sb.auth.getSession();
-    if (!session?.user) return alert('로그인이 필요합니다.');
+    if (!session?.user) { toast.error('로그인이 필요합니다.'); return; }
     const { data, error } = await sb
       .from('card_groups')
       .insert({ user_id: session.user.id, name: trimmed, color: color || DEFAULT_GROUP_COLOR.key })
       .select()
       .single();
     if (error) {
-      alert(`그룹 생성 실패: ${error.message}`);
+      toast.error(`그룹 생성 실패: ${error.message}`);
       return;
     }
     setGroups(prev => [...prev, data]);
@@ -416,7 +418,7 @@ export default function Home() {
     if (!sb) return;
     const { error } = await sb.from('card_groups').update({ color }).eq('id', id);
     if (error) {
-      alert(`색상 변경 실패: ${error.message}`);
+      toast.error(`색상 변경 실패: ${error.message}`);
       return;
     }
     setGroups(prev => prev.map(g => (g.id === id ? { ...g, color } : g)));
@@ -429,19 +431,25 @@ export default function Home() {
     if (!sb) return;
     const { error } = await sb.from('card_groups').update({ name: trimmed }).eq('id', id);
     if (error) {
-      alert(`이름 변경 실패: ${error.message}`);
+      toast.error(`이름 변경 실패: ${error.message}`);
       return;
     }
     setGroups(prev => prev.map(g => (g.id === id ? { ...g, name: trimmed } : g)));
   };
 
   const deleteGroup = async (id) => {
-    if (!confirm('이 그룹을 삭제하시겠습니까? 명함 자체는 삭제되지 않습니다.')) return;
+    const ok = await confirm({
+      title: '그룹 삭제',
+      message: '이 그룹을 삭제하시겠습니까? 명함 자체는 삭제되지 않습니다.',
+      confirmLabel: '삭제',
+      danger: true,
+    });
+    if (!ok) return;
     const sb = getSupabaseClient();
     if (!sb) return;
     const { error } = await sb.from('card_groups').delete().eq('id', id);
     if (error) {
-      alert(`삭제 실패: ${error.message}`);
+      toast.error(`삭제 실패: ${error.message}`);
       return;
     }
     setGroups(prev => prev.filter(g => g.id !== id));
@@ -476,19 +484,19 @@ export default function Home() {
     const sb = getSupabaseClient();
     if (!sb) return;
     const { data: { session } } = await sb.auth.getSession();
-    if (!session?.user) return alert('로그인이 필요합니다.');
+    if (!session?.user) { toast.error('로그인이 필요합니다.'); return; }
 
     // 이미 멤버인 카드는 제외하고 추가
     const toAdd = ids.filter(id => !(cardGroupMap[id] || []).includes(groupId));
     if (!toAdd.length) {
-      alert('선택한 명함은 이미 이 그룹에 모두 포함되어 있습니다.');
+      toast.info('선택한 명함은 이미 이 그룹에 모두 포함되어 있습니다.');
       return;
     }
     const rows = toAdd.map(card_id => ({
       card_id, group_id: groupId, user_id: session.user.id,
     }));
     const { error } = await sb.from('card_group_members').insert(rows);
-    if (error) return alert(`일괄 지정 실패: ${error.message}`);
+    if (error) { toast.error(`일괄 지정 실패: ${error.message}`); return; }
 
     setCardGroupMap(prev => {
       const next = { ...prev };
@@ -505,7 +513,7 @@ export default function Home() {
     const ids = Array.from(selectedCardIds);
     const toRemove = ids.filter(id => (cardGroupMap[id] || []).includes(groupId));
     if (!toRemove.length) {
-      alert('선택한 명함 중 이 그룹에 포함된 명함이 없습니다.');
+      toast.info('선택한 명함 중 이 그룹에 포함된 명함이 없습니다.');
       return;
     }
     const sb = getSupabaseClient();
@@ -515,7 +523,7 @@ export default function Home() {
       .delete()
       .in('card_id', toRemove)
       .eq('group_id', groupId);
-    if (error) return alert(`해제 실패: ${error.message}`);
+    if (error) { toast.error(`해제 실패: ${error.message}`); return; }
 
     setCardGroupMap(prev => {
       const next = { ...prev };
@@ -540,7 +548,7 @@ export default function Home() {
         .delete()
         .eq('card_id', cardId)
         .eq('group_id', groupId);
-      if (error) return alert(`해제 실패: ${error.message}`);
+      if (error) { toast.error(`해제 실패: ${error.message}`); return; }
       setCardGroupMap(prev => ({
         ...prev,
         [cardId]: (prev[cardId] || []).filter(g => g !== groupId),
@@ -550,7 +558,7 @@ export default function Home() {
       const { error } = await sb
         .from('card_group_members')
         .insert({ card_id: cardId, group_id: groupId, user_id: session?.user?.id });
-      if (error) return alert(`추가 실패: ${error.message}`);
+      if (error) { toast.error(`추가 실패: ${error.message}`); return; }
       setCardGroupMap(prev => ({
         ...prev,
         [cardId]: [...(prev[cardId] || []), groupId],
@@ -721,7 +729,7 @@ export default function Home() {
       });
     } catch (err) {
       console.error(err);
-      alert(err.message);
+      toast.error(err.message);
     } finally {
       setIsExtracting(false);
     }
@@ -731,7 +739,7 @@ export default function Home() {
   const extractCardFromText = async (rawText) => {
     const text = (rawText || '').trim();
     if (!text) {
-      alert('텍스트를 입력해 주세요.');
+      toast.error('텍스트를 입력해 주세요.');
       return;
     }
     setIsExtracting(true);
@@ -759,7 +767,7 @@ export default function Home() {
       });
     } catch (err) {
       console.error(err);
-      alert(err.message);
+      toast.error(err.message);
     } finally {
       setIsExtracting(false);
     }
@@ -857,13 +865,13 @@ export default function Home() {
   const handleSaveBatchAll = async () => {
     const sb = getSupabaseClient();
     if (!sb) {
-      alert('Supabase 연결 설정이 필요합니다.');
+      toast.error('Supabase 연결 설정이 필요합니다.');
       return;
     }
 
     const successCards = batchResults.filter(c => c._status === 'success');
     if (successCards.length === 0) {
-      alert('저장할 수 있는 명함이 없습니다.');
+      toast.info('저장할 수 있는 명함이 없습니다.');
       return;
     }
 
@@ -918,7 +926,7 @@ export default function Home() {
     const parts = [];
     if (savedCount > 0) parts.push(`${savedCount}장 새로 추가`);
     if (updatedCount > 0) parts.push(`${updatedCount}장 업데이트`);
-    alert(`처리 완료: ${parts.join(', ')}`);
+    toast.success(`처리 완료: ${parts.join(', ')}`);
     setBatchResults([]);
     loadCards();
     setLoading(false);
@@ -1022,13 +1030,13 @@ export default function Home() {
         } catch (e) { console.warn('HubSpot 업데이트 실패:', e); }
       }
 
-      alert('기존 명함이 업데이트되었습니다.');
+      toast.success('기존 명함이 업데이트되었습니다.');
       setEditingCard(null);
       setCroppedImage(null);
       setDuplicateInfo(null);
       loadCards();
     } catch (err) {
-      alert(`업데이트 실패: ${err.message}`);
+      toast.error(`업데이트 실패: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -1045,13 +1053,13 @@ export default function Home() {
       const { error } = await sb.from('business_cards').insert([duplicateInfo.newCardData]);
       if (error) throw error;
 
-      alert('새 명함이 추가되었습니다.');
+      toast.success('새 명함이 추가되었습니다.');
       setEditingCard(null);
       setCroppedImage(null);
       setDuplicateInfo(null);
       loadCards();
     } catch (err) {
-      alert(`저장 실패: ${err.message}`);
+      toast.error(`저장 실패: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -1061,7 +1069,7 @@ export default function Home() {
     e.preventDefault();
     const sb = getSupabaseClient();
     if (!sb) {
-      alert('Supabase 연결 설정이 필요합니다.');
+      toast.error('Supabase 연결 설정이 필요합니다.');
       return;
     }
 
@@ -1108,7 +1116,7 @@ export default function Home() {
           } catch (e) { console.warn('HubSpot 자동 업데이트 실패:', e); }
         }
 
-        alert('명함이 성공적으로 저장되었습니다.');
+        toast.success('명함이 성공적으로 저장되었습니다.');
       } else {
         // 새 스캔 → 동일인(이름 + 핸드폰)이 이미 있으면 history에 이전 값 누적 후 최신 정보로 덮어쓰기
         const existing = await findDuplicate(cardData.name, cardData.mobile_phone);
@@ -1121,11 +1129,11 @@ export default function Home() {
             .update(updatePayload)
             .eq('id', existing.id);
           if (error) throw error;
-          alert(`${cardData.name} 님의 명함이 최신 정보로 업데이트되었고 이전 버전은 히스토리에 저장되었습니다.`);
+          toast.success(`${cardData.name} 님의 명함이 최신 정보로 업데이트되었고 이전 버전은 히스토리에 저장되었습니다.`);
         } else {
           const { error } = await sb.from('business_cards').insert([cardData]);
           if (error) throw error;
-          alert('명함이 성공적으로 저장되었습니다.');
+          toast.success('명함이 성공적으로 저장되었습니다.');
         }
       }
 
@@ -1140,14 +1148,20 @@ export default function Home() {
       loadCards();
     } catch (err) {
       console.error(err);
-      alert(`저장 실패: ${err.message}`);
+      toast.error(`저장 실패: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
   const handleDeleteCard = async (id) => {
-    if (!confirm('정말로 이 명함을 삭제하시겠습니까?')) return;
+    const ok = await confirm({
+      title: '명함 삭제',
+      message: '정말로 이 명함을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.',
+      confirmLabel: '삭제',
+      danger: true,
+    });
+    if (!ok) return;
     
     const sb = getSupabaseClient();
     if (!sb) return;
@@ -1163,10 +1177,10 @@ export default function Home() {
       
       setViewingCard(null);
       loadCards();
-      alert('명함이 삭제되었습니다.');
+      toast.success('명함이 삭제되었습니다.');
     } catch (err) {
       console.error(err);
-      alert(`삭제 에러: ${err.message}`);
+      toast.error(`삭제 에러: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -1205,15 +1219,15 @@ export default function Home() {
       }
 
       if (result.merged) {
-        alert('이미 HubSpot에 등록된 연락처를 찾았습니다. 최신 정보로 업데이트하고 연결했습니다.');
+        toast.success('이미 HubSpot에 등록된 연락처를 찾았습니다. 최신 정보로 업데이트하고 연결했습니다.');
       } else if (card.hubspot_id) {
-        alert('HubSpot 연락처가 최신 정보로 업데이트되었습니다.');
+        toast.success('HubSpot 연락처가 최신 정보로 업데이트되었습니다.');
       } else {
-        alert('HubSpot 연락처에 정상적으로 등록되었습니다!');
+        toast.success('HubSpot 연락처에 정상적으로 등록되었습니다!');
       }
     } catch (err) {
       console.error(err);
-      alert(`HubSpot 연동 오류: ${err.message}`);
+      toast.error(`HubSpot 연동 오류: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -1566,6 +1580,8 @@ export default function Home() {
                   <img
                     src={card.image_url}
                     alt={card.name || '명함'}
+                    loading="lazy"
+                    decoding="async"
                     style={{
                       width: '64px',
                       height: '40px',
@@ -1617,10 +1633,10 @@ export default function Home() {
 
         {/* 중복 명함 확인 모달 */}
         {duplicateInfo && (
-          <div className="loading-overlay" style={{ zIndex: 200, padding: '20px' }}>
-            <div className="glass" style={{ 
-              padding: '28px', 
-              maxWidth: '440px', 
+          <div className="modal-overlay" style={{ zIndex: 210 }}>
+            <div className="glass" style={{
+              padding: '28px',
+              maxWidth: '440px',
               width: '100%',
               animation: 'fadeIn 0.2s ease'
             }}>
@@ -2041,7 +2057,7 @@ export default function Home() {
                         {/* 왼쪽 명함 썸네일 */}
                         <div className="card-thumb">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={card.image_url} alt={card.name} />
+                          <img src={card.image_url} alt={card.name} loading="lazy" decoding="async" />
                         </div>
 
                         {/* 오른쪽 정보 */}
@@ -2267,6 +2283,8 @@ export default function Home() {
                           <img
                             src={entry.image_url}
                             alt="이전 명함"
+                            loading="lazy"
+                            decoding="async"
                             onClick={() => setLightboxImage(entry.image_url)}
                             style={{
                               width: '72px',
@@ -2463,11 +2481,11 @@ export default function Home() {
                 type="button"
                 onClick={() => {
                   if (groups.length === 0) {
-                    alert('먼저 그룹을 만들어 주세요.');
+                    toast.info('먼저 그룹을 만들어 주세요.');
                     return;
                   }
                   if (selectedCardIds.size === 0) {
-                    alert('명함을 한 개 이상 선택해 주세요.');
+                    toast.info('명함을 한 개 이상 선택해 주세요.');
                     return;
                   }
                   setShowBulkAssign(true);
@@ -2791,7 +2809,7 @@ export default function Home() {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                saveImageToDevice(lightboxImage);
+                saveImageToDevice(lightboxImage).catch((err) => toast.error(err.message));
               }}
               aria-label="이미지 저장"
               title="앨범에 저장"

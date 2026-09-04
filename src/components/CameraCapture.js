@@ -2,8 +2,10 @@
 
 import React, { useRef, useState, useEffect } from 'react';
 import { Image as ImageIcon, FileText, X, Zap, ZapOff } from 'lucide-react';
+import { useToast } from './Toast';
 
 export default function CameraCapture({ onImageSelected, onBatchSelected, onDualSideSelected, onClose, onManualInput }) {
+  const { toast } = useToast();
   const videoRef = useRef(null);
   const canvasRef = useRef(null); // 실시간 오버레이 캔버스
   const fileInputRef = useRef(null);
@@ -74,7 +76,7 @@ export default function CameraCapture({ onImageSelected, onBatchSelected, onDual
           console.warn('플래시 제어 불가:', e);
         }
       } else {
-        alert('이 기기에서는 플래시 제어를 지원하지 않습니다.');
+        toast.info('이 기기에서는 플래시 제어를 지원하지 않습니다.');
       }
     }
   };

@@ -4,8 +4,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import Cropper from 'cropperjs';
 import 'cropperjs/dist/cropper.css';
 import { Crop, X, RefreshCw, Sparkles } from 'lucide-react';
+import { useToast } from './Toast';
 
 export default function ImageCropper({ imageSrc, onCropComplete, onCancel, stageLabel }) {
+  const { toast } = useToast();
   const imageRef = useRef(null);
   const cropperRef = useRef(null);
   const [loading, setLoading] = useState(false);
@@ -199,7 +201,7 @@ export default function ImageCropper({ imageSrc, onCropComplete, onCancel, stage
           height: detected.height,
         });
       } else {
-        alert('명함 테두리를 감지할 수 없습니다. 수동으로 조절해 주세요.');
+        toast.info('명함 테두리를 감지할 수 없습니다. 수동으로 조절해 주세요.');
       }
     }
   };

@@ -1,4 +1,5 @@
 import "./globals.css";
+import { ToastProvider } from "@/components/Toast";
 
 export const metadata = {
   title: "명함 인식 및 관리 시스템 (Smart Card Wallet)",
@@ -25,54 +26,60 @@ export const viewport = {
 };
 
 export default function RootLayout({ children }) {
+  const isDev = process.env.NODE_ENV === 'development';
+
   return (
     <html lang="ko">
       <body>
-        {/* 모바일 디버깅용 에러 출력 배너 */}
-        <div 
-          id="mobile-debug-log" 
-          style={{
-            position: 'fixed', 
-            bottom: 0, 
-            left: 0, 
-            right: 0, 
-            background: 'rgba(220, 38, 38, 0.95)', 
-            color: 'white', 
-            fontFamily: 'monospace', 
-            fontSize: '11px', 
-            padding: '12px', 
-            zIndex: 999999, 
-            maxHeight: '180px', 
-            overflowY: 'auto', 
-            display: 'none',
-            borderTop: '2px solid white'
-          }}
-        >
-          <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>⚠️ 브라우저 스크립트 에러 감지:</div>
-        </div>
+        {/* 모바일 디버깅용 에러 출력 배너 (개발 환경에서만 주입) */}
+        {isDev && (
+        <>
+          <div
+            id="mobile-debug-log"
+            style={{
+              position: 'fixed', 
+              bottom: 0, 
+              left: 0, 
+              right: 0, 
+              background: 'rgba(220, 38, 38, 0.95)', 
+              color: 'white', 
+              fontFamily: 'monospace', 
+              fontSize: '11px', 
+              padding: '12px', 
+              zIndex: 999999, 
+              maxHeight: '180px', 
+              overflowY: 'auto', 
+              display: 'none',
+              borderTop: '2px solid white'
+            }}
+          >
+            <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>⚠️ 브라우저 스크립트 에러 감지:</div>
+          </div>
         
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              window.onerror = function(msg, url, line, col, error) {
-                var debugLog = document.getElementById('mobile-debug-log');
-                if (debugLog) {
-                  debugLog.style.display = 'block';
-                  debugLog.innerHTML += '<div>• ' + msg + ' (Line: ' + line + ', Col: ' + col + ')</div>';
-                }
-                return false;
-              };
-              window.addEventListener('unhandledrejection', function(event) {
-                var debugLog = document.getElementById('mobile-debug-log');
-                if (debugLog) {
-                  debugLog.style.display = 'block';
-                  debugLog.innerHTML += '<div>• Unhandled Promise Rejection: ' + (event.reason ? event.reason.message || event.reason : 'unknown') + '</div>';
-                }
-              });
-            `
-          }}
-        />
-        {children}
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `
+                window.onerror = function(msg, url, line, col, error) {
+                  var debugLog = document.getElementById('mobile-debug-log');
+                  if (debugLog) {
+                    debugLog.style.display = 'block';
+                    debugLog.innerHTML += '<div>• ' + msg + ' (Line: ' + line + ', Col: ' + col + ')</div>';
+                  }
+                  return false;
+                };
+                window.addEventListener('unhandledrejection', function(event) {
+                  var debugLog = document.getElementById('mobile-debug-log');
+                  if (debugLog) {
+                    debugLog.style.display = 'block';
+                    debugLog.innerHTML += '<div>• Unhandled Promise Rejection: ' + (event.reason ? event.reason.message || event.reason : 'unknown') + '</div>';
+                  }
+                });
+              `
+            }}
+          />
+        </>
+        )}
+        <ToastProvider>{children}</ToastProvider>
       </body>
     </html>
   );
