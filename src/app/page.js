@@ -14,6 +14,8 @@ import AuthPanel from '../components/AuthPanel';
 import CardList from '../components/CardList';
 import CardDetail from '../components/CardDetail';
 import CardEditForm from '../components/CardEditForm';
+import BatchResults from '../components/BatchResults';
+import DuplicateDialog from '../components/DuplicateDialog';
 import { GROUP_COLORS, DEFAULT_GROUP_COLOR, getGroupColor } from '../lib/groupColors';
 import { classifyPhone } from '../lib/phone';
 
@@ -1471,191 +1473,25 @@ export default function Home() {
 
         {/* 배치 처리 결과 목록 */}
         {batchResults.length > 0 && !editingCard && (
-          <div className="glass" style={{ padding: '24px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h3 className="section-title">
-                <Sparkles size={18} className="color-violet" />
-                일괄 스캔 결과 ({batchResults.filter(c => c._status === 'success').length}/{batchResults.length}장 인식)
-              </h3>
-              <button
-                onClick={() => setBatchResults([])}
-                style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
-              {batchResults.map((card, idx) => (
-                <div
-                  key={idx}
-                  onClick={() => card._status === 'success' && handleSelectBatchResult(idx)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '12px',
-                    padding: '12px',
-                    background: card._status === 'success' ? 'rgba(99,102,241,0.1)' : 'rgba(239,68,68,0.1)',
-                    borderRadius: '12px',
-                    cursor: card._status === 'success' ? 'pointer' : 'default',
-                    border: `1px solid ${card._status === 'success' ? 'rgba(99,102,241,0.25)' : 'rgba(239,68,68,0.25)'}`,
-                    transition: 'transform 0.15s, box-shadow 0.15s'
-                  }}
-                  onMouseEnter={(e) => card._status === 'success' && (e.currentTarget.style.transform = 'translateY(-1px)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.transform = 'translateY(0)')}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={card.image_url}
-                    alt={card.name || '명함'}
-                    loading="lazy"
-                    decoding="async"
-                    style={{
-                      width: '64px',
-                      height: '40px',
-                      objectFit: 'cover',
-                      borderRadius: '8px',
-                      border: '1px solid rgba(255,255,255,0.1)'
-                    }}
-                  />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {card.name || `카드 ${idx + 1}`}
-                    </div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                      {card._status === 'success'
-                        ? `${card.company || ''}${card.title ? ' · ' + card.title : ''}`
-                        : `❌ ${card._error || '인식 실패'}`
-                      }
-                    </div>
-                  </div>
-                  {card._status === 'success' && (
-                    <div style={{ fontSize: '11px', color: '#6366f1', fontWeight: 600, flexShrink: 0 }}>편집 →</div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {batchResults.filter(c => c._status === 'success').length > 0 && (
-              <button
-                onClick={handleSaveBatchAll}
-                disabled={loading}
-                className="btn btn-primary"
-                style={{ 
-                  width: '100%', 
-                  justifyContent: 'center', 
-                  gap: '10px',
-                  padding: '18px 24px',
-                  fontSize: '17px',
-                  fontWeight: 700,
-                  borderRadius: '16px',
-                  marginTop: '4px'
-                }}
-              >
-                <Save size={22} />
-                {loading ? '저장 중...' : `${batchResults.filter(c => c._status === 'success').length}장 전체 저장`}
-              </button>
-            )}
-          </div>
+          <BatchResults
+            results={batchResults}
+            loading={loading}
+            onSelect={handleSelectBatchResult}
+            onSaveAll={handleSaveBatchAll}
+            onClose={() => setBatchResults([])}
+          />
         )}
 
         {/* 중복 명함 확인 모달 */}
         {duplicateInfo && (
-          <div className="modal-overlay" style={{ zIndex: 210 }}>
-            <div className="glass" style={{
-              padding: '28px',
-              maxWidth: '440px',
-              width: '100%',
-              animation: 'fadeIn 0.2s ease'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
-                <AlertCircle size={22} style={{ color: '#f59e0b', flexShrink: 0 }} />
-                <h3 style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
-                  동일인 명함 발견
-                </h3>
-              </div>
-
-              <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px', lineHeight: '1.5' }}>
-                <strong style={{ color: 'var(--text-primary)' }}>{duplicateInfo.existingCard.name}</strong> 님의 명함이 이미 등록되어 있습니다.
-                기존 정보를 새 명함으로 업데이트하시겠습니까?
-              </p>
-
-              {/* 기존 vs 새 정보 비교 */}
-              <div style={{ 
-                display: 'grid', 
-                gridTemplateColumns: '1fr 1fr', 
-                gap: '12px', 
-                marginBottom: '20px',
-                fontSize: '12px'
-              }}>
-                <div style={{ 
-                  padding: '12px', 
-                  background: 'rgba(239,68,68,0.08)', 
-                  borderRadius: '10px',
-                  border: '1px solid rgba(239,68,68,0.2)'
-                }}>
-                  <div style={{ fontWeight: 700, color: '#ef4444', marginBottom: '8px', fontSize: '11px' }}>📋 기존 정보</div>
-                  <div style={{ color: 'var(--text-secondary)', lineHeight: '1.6' }}>
-                    <div>{duplicateInfo.existingCard.company || '(회사 없음)'}</div>
-                    <div>{duplicateInfo.existingCard.title || '(직함 없음)'}</div>
-                    <div>{duplicateInfo.existingCard.email || '(이메일 없음)'}</div>
-                  </div>
-                </div>
-                <div style={{ 
-                  padding: '12px', 
-                  background: 'rgba(34,197,94,0.08)', 
-                  borderRadius: '10px',
-                  border: '1px solid rgba(34,197,94,0.2)'
-                }}>
-                  <div style={{ fontWeight: 700, color: '#22c55e', marginBottom: '8px', fontSize: '11px' }}>✨ 새 정보</div>
-                  <div style={{ color: 'var(--text-secondary)', lineHeight: '1.6' }}>
-                    <div>{duplicateInfo.newCardData.company || '(회사 없음)'}</div>
-                    <div>{duplicateInfo.newCardData.title || '(직함 없음)'}</div>
-                    <div>{duplicateInfo.newCardData.email || '(이메일 없음)'}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <button
-                  onClick={handleDuplicateUpdate}
-                  disabled={loading}
-                  className="btn btn-primary"
-                  style={{ 
-                    width: '100%', justifyContent: 'center', gap: '8px',
-                    padding: '14px', fontSize: '15px', fontWeight: 700, borderRadius: '12px'
-                  }}
-                >
-                  <RefreshCw size={18} />
-                  기존 명함 업데이트
-                </button>
-                <button
-                  onClick={handleDuplicateAddNew}
-                  disabled={loading}
-                  style={{ 
-                    width: '100%', padding: '14px', fontSize: '15px', fontWeight: 700, 
-                    borderRadius: '12px', border: '1px solid rgba(255,255,255,0.15)',
-                    background: 'rgba(255,255,255,0.06)', color: 'var(--text-primary)',
-                    cursor: 'pointer', display: 'flex', alignItems: 'center', 
-                    justifyContent: 'center', gap: '8px'
-                  }}
-                >
-                  <Plus size={18} />
-                  새 명함으로 추가
-                </button>
-                <button
-                  onClick={() => setDuplicateInfo(null)}
-                  style={{ 
-                    width: '100%', padding: '10px', fontSize: '13px',
-                    background: 'none', border: 'none', color: 'var(--text-secondary)',
-                    cursor: 'pointer'
-                  }}
-                >
-                  취소
-                </button>
-              </div>
-            </div>
-          </div>
+          <DuplicateDialog
+            existingCard={duplicateInfo.existingCard}
+            newCardData={duplicateInfo.newCardData}
+            loading={loading}
+            onUpdate={handleDuplicateUpdate}
+            onAddNew={handleDuplicateAddNew}
+            onCancel={() => setDuplicateInfo(null)}
+          />
         )}
 
         {/* 명함 정보 상세 입력 및 교정 (OCR 완료 후) */}
