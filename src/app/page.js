@@ -13,6 +13,7 @@ import { useToast } from '../components/Toast';
 import AuthPanel from '../components/AuthPanel';
 import CardList from '../components/CardList';
 import CardDetail from '../components/CardDetail';
+import CardEditForm from '../components/CardEditForm';
 import { GROUP_COLORS, DEFAULT_GROUP_COLOR, getGroupColor } from '../lib/groupColors';
 import { classifyPhone } from '../lib/phone';
 
@@ -1659,212 +1660,15 @@ export default function Home() {
 
         {/* 명함 정보 상세 입력 및 교정 (OCR 완료 후) */}
         {editingCard && !isExtracting && (
-          <div ref={editFormRef} className="glass" style={{ padding: '28px', scrollMarginTop: '24px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <h3 className="section-title">
-                <Sparkles size={18} className="color-violet" />
-                추출 데이터 검토 및 교정
-              </h3>
-              <button
-                onClick={() => {
-                  setEditingCard(null);
-                  setCroppedImage(null);
-                }}
-                className="modal-close-btn"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveCard} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              <div className="form-card-row">
-                {/* 왼쪽 크롭된 이미지 썸네일 */}
-                <div className="form-image-container">
-                  <div className="biz-card-sim" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '8px', background: '#000' }}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={editingCard.image_url}
-                      alt="Cropped card front"
-                      style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '8px' }}
-                    />
-                  </div>
-                  <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', marginTop: '12px', letterSpacing: '0.05em' }}>
-                    앞면
-                  </span>
-
-                  {editingCard.back_image_url && (
-                    <>
-                      <div
-                        className="biz-card-sim"
-                        style={{
-                          width: '100%',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          padding: '8px',
-                          background: '#000',
-                          marginTop: '16px',
-                          position: 'relative',
-                        }}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={editingCard.back_image_url}
-                          alt="Cropped card back"
-                          style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '8px' }}
-                        />
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setEditingCard({ ...editingCard, back_image_url: null })
-                          }
-                          style={{
-                            position: 'absolute',
-                            top: '6px',
-                            right: '6px',
-                            width: '24px',
-                            height: '24px',
-                            borderRadius: '50%',
-                            background: 'rgba(0,0,0,0.7)',
-                            border: '1px solid rgba(255,255,255,0.2)',
-                            color: '#fff',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            padding: 0,
-                          }}
-                          aria-label="뒷면 제거"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                      <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary)', marginTop: '12px', letterSpacing: '0.05em' }}>
-                        뒷면
-                      </span>
-                    </>
-                  )}
-                </div>
-
-                {/* 오른쪽 폼 입력 영역 */}
-                <div className="form-grid" style={{ flex: 1 }}>
-                  <div className="form-group">
-                    <label>성 (Last Name)</label>
-                    <input
-                      type="text"
-                      value={editingCard.last_name || ''}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/\s+/g, '');
-                        setEditingCard({
-                          ...editingCard,
-                          last_name: val,
-                          name: `${val}${editingCard.first_name || ''}`
-                        });
-                      }}
-                      className="premium-input"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>이름 (First Name)</label>
-                    <input
-                      type="text"
-                      required
-                      value={editingCard.first_name || ''}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/\s+/g, '');
-                        setEditingCard({
-                          ...editingCard,
-                          first_name: val,
-                          name: `${editingCard.last_name || ''}${val}`
-                        });
-                      }}
-                      className="premium-input"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>회사명</label>
-                    <input
-                      type="text"
-                      value={editingCard.company || ''}
-                      onChange={(e) => setEditingCard({ ...editingCard, company: e.target.value })}
-                      className="premium-input"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>부서</label>
-                    <input
-                      type="text"
-                      value={editingCard.department || ''}
-                      onChange={(e) => setEditingCard({ ...editingCard, department: e.target.value })}
-                      className="premium-input"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>직급/직책</label>
-                    <input
-                      type="text"
-                      value={editingCard.title || ''}
-                      onChange={(e) => setEditingCard({ ...editingCard, title: e.target.value })}
-                      className="premium-input"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>핸드폰 번호</label>
-                    <input
-                      type="text"
-                      value={editingCard.mobile_phone || ''}
-                      onChange={(e) => setEditingCard({ ...editingCard, mobile_phone: e.target.value })}
-                      className="premium-input"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>사무실 전화번호</label>
-                    <input
-                      type="text"
-                      value={editingCard.office_phone || ''}
-                      onChange={(e) => setEditingCard({ ...editingCard, office_phone: e.target.value })}
-                      className="premium-input"
-                    />
-                  </div>
-                  <div className="form-group form-group-full">
-                    <label>이메일 주소</label>
-                    <input
-                      type="email"
-                      value={editingCard.email || ''}
-                      onChange={(e) => setEditingCard({ ...editingCard, email: e.target.value })}
-                      className="premium-input"
-                    />
-                  </div>
-                  <div className="form-group form-group-full">
-                    <label>주소</label>
-                    <input
-                      type="text"
-                      value={editingCard.address || ''}
-                      onChange={(e) => setEditingCard({ ...editingCard, address: e.target.value })}
-                      className="premium-input"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '20px' }}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingCard(null);
-                    setCroppedImage(null);
-                  }}
-                  className="btn btn-secondary"
-                >
-                  취소
-                </button>
-                <button type="submit" disabled={loading} className="btn btn-primary">
-                  <Save size={14} />
-                  명함 지갑에 보관
-                </button>
-              </div>
-            </form>
-          </div>
+          <CardEditForm
+            card={editingCard}
+            loading={loading}
+            formRef={editFormRef}
+            onChange={(patch) => setEditingCard(prev => ({ ...prev, ...patch }))}
+            onRemoveBack={() => setEditingCard(prev => ({ ...prev, back_image_url: null }))}
+            onCancel={() => { setEditingCard(null); setCroppedImage(null); }}
+            onSubmit={handleSaveCard}
+          />
         )}
 
         {/* 저장된 명함 목록 */}
