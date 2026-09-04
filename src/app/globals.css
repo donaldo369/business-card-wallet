@@ -1425,3 +1425,20 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* 상세 패널 하단 액션 */
+.detail-pane-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.card-item:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}

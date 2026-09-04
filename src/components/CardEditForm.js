@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useId } from 'react';
 import { Save, Sparkles, X } from 'lucide-react';
 
 /**
@@ -8,6 +8,7 @@ import { Save, Sparkles, X } from 'lucide-react';
  * onChange 는 바뀐 필드만 담은 patch 를 넘기고, 병합은 호출자가 한다.
  */
 export default function CardEditForm({ card, loading, formRef, onChange, onRemoveBack, onCancel, onSubmit }) {
+  const uid = useId();
   return (
       <div ref={formRef} className="glass" style={{ padding: '28px', scrollMarginTop: '24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
@@ -96,8 +97,9 @@ export default function CardEditForm({ card, loading, formRef, onChange, onRemov
             {/* 오른쪽 폼 입력 영역 */}
             <div className="form-grid" style={{ flex: 1 }}>
               <div className="form-group">
-                <label>성 (Last Name)</label>
+                <label htmlFor={`${uid}-f0`}>성 (Last Name)</label>
                 <input
+                  id={`${uid}-f0`}
                   type="text"
                   value={card.last_name || ''}
                   onChange={(e) => {
@@ -111,8 +113,9 @@ export default function CardEditForm({ card, loading, formRef, onChange, onRemov
                 />
               </div>
               <div className="form-group">
-                <label>이름 (First Name)</label>
+                <label htmlFor={`${uid}-f1`}>이름 (First Name)</label>
                 <input
+                  id={`${uid}-f1`}
                   type="text"
                   required
                   value={card.first_name || ''}
@@ -127,8 +130,9 @@ export default function CardEditForm({ card, loading, formRef, onChange, onRemov
                 />
               </div>
               <div className="form-group">
-                <label>회사명</label>
+                <label htmlFor={`${uid}-f2`}>회사명</label>
                 <input
+                  id={`${uid}-f2`}
                   type="text"
                   value={card.company || ''}
                   onChange={(e) => onChange({ company: e.target.value })}
@@ -136,8 +140,9 @@ export default function CardEditForm({ card, loading, formRef, onChange, onRemov
                 />
               </div>
               <div className="form-group">
-                <label>부서</label>
+                <label htmlFor={`${uid}-f3`}>부서</label>
                 <input
+                  id={`${uid}-f3`}
                   type="text"
                   value={card.department || ''}
                   onChange={(e) => onChange({ department: e.target.value })}
@@ -145,8 +150,9 @@ export default function CardEditForm({ card, loading, formRef, onChange, onRemov
                 />
               </div>
               <div className="form-group">
-                <label>직급/직책</label>
+                <label htmlFor={`${uid}-f4`}>직급/직책</label>
                 <input
+                  id={`${uid}-f4`}
                   type="text"
                   value={card.title || ''}
                   onChange={(e) => onChange({ title: e.target.value })}
@@ -154,8 +160,9 @@ export default function CardEditForm({ card, loading, formRef, onChange, onRemov
                 />
               </div>
               <div className="form-group">
-                <label>핸드폰 번호</label>
+                <label htmlFor={`${uid}-f5`}>핸드폰 번호</label>
                 <input
+                  id={`${uid}-f5`}
                   type="text"
                   value={card.mobile_phone || ''}
                   onChange={(e) => onChange({ mobile_phone: e.target.value })}
@@ -163,8 +170,9 @@ export default function CardEditForm({ card, loading, formRef, onChange, onRemov
                 />
               </div>
               <div className="form-group">
-                <label>사무실 전화번호</label>
+                <label htmlFor={`${uid}-f6`}>사무실 전화번호</label>
                 <input
+                  id={`${uid}-f6`}
                   type="text"
                   value={card.office_phone || ''}
                   onChange={(e) => onChange({ office_phone: e.target.value })}
@@ -172,8 +180,9 @@ export default function CardEditForm({ card, loading, formRef, onChange, onRemov
                 />
               </div>
               <div className="form-group form-group-full">
-                <label>이메일 주소</label>
+                <label htmlFor={`${uid}-f7`}>이메일 주소</label>
                 <input
+                  id={`${uid}-f7`}
                   type="email"
                   value={card.email || ''}
                   onChange={(e) => onChange({ email: e.target.value })}
@@ -181,8 +190,9 @@ export default function CardEditForm({ card, loading, formRef, onChange, onRemov
                 />
               </div>
               <div className="form-group form-group-full">
-                <label>주소</label>
+                <label htmlFor={`${uid}-f8`}>주소</label>
                 <input
+                  id={`${uid}-f8`}
                   type="text"
                   value={card.address || ''}
                   onChange={(e) => onChange({ address: e.target.value })}

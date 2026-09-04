@@ -6,7 +6,16 @@ import { Check, Mail, Phone } from 'lucide-react';
 export default function CardListItem({ card, groupBadges, selectionMode, isSelected, onActivate }) {
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-pressed={selectionMode ? isSelected : undefined}
       onClick={() => onActivate(card)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onActivate(card);
+        }
+      }}
       className={`glass card-item ${selectionMode ? 'card-item-selectable' : ''} ${isSelected ? 'card-item-selected' : ''}`}
     >
       {selectionMode && (

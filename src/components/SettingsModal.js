@@ -5,6 +5,7 @@ import Sheet from './Sheet';
 
 /** Supabase / Gemini / Claude / HubSpot 연동 키 설정. */
 export default function SettingsModal({ settings, onChange, onSubmit, onClose }) {
+  const uid = useId();
   const formId = useId();
 
   return (
@@ -24,8 +25,9 @@ export default function SettingsModal({ settings, onChange, onSubmit, onClose })
     >
       <form id={formId} onSubmit={onSubmit} style={{ display: 'flex', flexDirection: 'column' }}>
         <div className="form-group">
-          <label>Supabase URL</label>
+          <label htmlFor={`${uid}-f0`}>Supabase URL</label>
           <input
+                  id={`${uid}-f0`}
             type="text"
             placeholder="https://your-project.supabase.co"
             value={settings.supabaseUrl}
@@ -35,8 +37,9 @@ export default function SettingsModal({ settings, onChange, onSubmit, onClose })
         </div>
 
         <div className="form-group">
-          <label>Supabase Anon Key</label>
+          <label htmlFor={`${uid}-f1`}>Supabase Anon Key</label>
           <input
+                  id={`${uid}-f1`}
             type="password"
             placeholder="eyJhbGciOi..."
             value={settings.supabaseAnonKey}
@@ -46,8 +49,9 @@ export default function SettingsModal({ settings, onChange, onSubmit, onClose })
         </div>
 
         <div className="form-group">
-          <label>Gemini API Key</label>
+          <label htmlFor={`${uid}-f2`}>Gemini API Key</label>
           <input
+                  id={`${uid}-f2`}
             type="password"
             placeholder="AIzaSy..."
             value={settings.geminiKey}
@@ -60,8 +64,9 @@ export default function SettingsModal({ settings, onChange, onSubmit, onClose })
         </div>
 
         <div className="form-group">
-          <label>Anthropic (Claude) API Key</label>
+          <label htmlFor={`${uid}-f3`}>Anthropic (Claude) API Key</label>
           <input
+                  id={`${uid}-f3`}
             type="password"
             placeholder="sk-ant-..."
             value={settings.anthropicKey}
@@ -74,8 +79,9 @@ export default function SettingsModal({ settings, onChange, onSubmit, onClose })
         </div>
 
         <div className="form-group">
-          <label>HubSpot Private App Token</label>
+          <label htmlFor={`${uid}-f4`}>HubSpot Private App Token</label>
           <input
+                  id={`${uid}-f4`}
             type="password"
             placeholder="pat-na1-..."
             value={settings.hubspotToken}
