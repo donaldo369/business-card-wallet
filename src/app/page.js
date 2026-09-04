@@ -21,6 +21,8 @@ import GroupManageModal from '../components/GroupManageModal';
 import CreateGroupModal from '../components/CreateGroupModal';
 import BulkAssignModal from '../components/BulkAssignModal';
 import Sheet from '../components/Sheet';
+import AppShell from '../components/AppShell';
+import GroupSidebar from '../components/GroupSidebar';
 import { DEFAULT_GROUP_COLOR, getGroupColor } from '../lib/groupColors';
 import { classifyPhone } from '../lib/phone';
 
@@ -1238,6 +1240,18 @@ export default function Home() {
     return Object.entries(groups);
   }, [filteredCards]);
 
+  const sidebarCounts = React.useMemo(() => {
+    const byGroup = {};
+    groups.forEach(g => { byGroup[g.id] = 0; });
+    let ungrouped = 0;
+    cards.forEach(card => {
+      const ids = cardGroupMap[card.id] || [];
+      if (ids.length === 0) ungrouped += 1;
+      ids.forEach(id => { if (byGroup[id] !== undefined) byGroup[id] += 1; });
+    });
+    return { all: cards.length, ungrouped, byGroup };
+  }, [cards, cardGroupMap, groups]);
+
   const groupCounts = React.useMemo(() => {
     const counts = {};
     groups.forEach(g => { counts[g.id] = 0; });
@@ -1261,610 +1275,631 @@ export default function Home() {
 
 
   return (
-    <div className="app-container">
-      {/* 헤더 섹션 */}
-      <header className="header-container">
-        <div className="logo-section">
-          <div className="logo-icon-box">
-            <Smartphone size={22} style={{ color: '#fff' }} />
-          </div>
-          <div className="logo-title-group">
-            <h1>Smart Card Wallet</h1>
-            <p>명함 AI 관리 & CRM 연동</p>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {user && (
-            <>
-              <div className="user-profile-header">
-                <User size={14} className="color-violet" />
-                <span className="user-email-text">{user.email}</span>
-                <button onClick={handleSignOut} className="signout-btn" title="로그아웃">
-                  <LogOut size={16} />
-                </button>
-              </div>
-              <button onClick={() => setShowSettings(true)} className="settings-btn" title="설정">
-                <Settings size={20} />
-              </button>
-            </>
-          )}
-        </div>
-      </header>
-
-      {/* Supabase 미연결 경고 */}
-      {!supabaseReady && !initialLoading && (
-        <div className="alert-banner">
-          <div className="alert-icon-box">
-            <AlertCircle size={18} />
-          </div>
-          <div className="alert-content">
-            <h4>Supabase 데이터베이스 연동이 필요합니다</h4>
-            <p>명함을 저장하고 클라우드 동기화를 진행하기 위해 Supabase 프로젝트 키가 필요합니다.</p>
-            <button onClick={() => setShowSettings(true)} className="alert-link-btn">
-              연동 키 설정하러 가기
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 로그인 화면 */}
-      {supabaseReady && !user && !initialLoading && (
-        <AuthPanel
-          email={authEmail}
-          password={authPassword}
-          loading={loading}
-          onEmailChange={setAuthEmail}
-          onPasswordChange={setAuthPassword}
-          onSubmit={handleAuthSubmit}
+    <AppShell
+      sidebar={user ? (
+        <GroupSidebar
+          groups={groups}
+          counts={sidebarCounts}
+          activeGroupId={activeGroupId}
+          userEmail={user.email}
+          onSelectGroup={setActiveGroupId}
+          onCreateGroup={() => { setNewGroupName(''); setNewGroupColor(DEFAULT_GROUP_COLOR.key); setShowCreateGroup(true); }}
+          onManageGroups={() => setShowGroupManage(true)}
+          onOpenSettings={() => setShowSettings(true)}
+          onSignOut={handleSignOut}
         />
-      )}
-      {/* 메인 콘텐츠 영역 (로그인 완료 시 노출) */}
-      {user && (
-        <main style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-          {/* 검색 및 명함 추가 바 */}
-          <div className="actions-bar">
-            <div className="search-wrapper">
-              <Search size={18} className="search-icon" />
-              <input
-                type="text"
-                placeholder="이름, 회사명, 이메일, 전화번호 검색..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="premium-input search-input"
-              />
+      ) : null}
+      main={(
+        <div className="app-container">
+          {/* 헤더 섹션 */}
+          <header className="header-container">
+            <div className="logo-section">
+              <div className="logo-icon-box">
+                <Smartphone size={22} style={{ color: '#fff' }} />
+              </div>
+              <div className="logo-title-group">
+                <h1>Smart Card Wallet</h1>
+                <p>명함 AI 관리 & CRM 연동</p>
+              </div>
             </div>
-            <button onClick={handleAddNewCard} className="btn btn-primary btn-add">
-              <Plus size={18} />
-              <span>새 명함 추가</span>
-            </button>
-            <button
-              onClick={() => { setTextInputValue(''); setShowTextInput(true); }}
-              className="btn btn-secondary btn-add"
-              title="텍스트에서 AI로 인식"
-            >
-              <FileText size={18} />
-              <span>텍스트 입력</span>
-            </button>
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleDesktopFileChange}
-              accept="image/*"
-              multiple
-              style={{ display: 'none' }}
-            />
-          </div>
 
-          {/* 촬영 및 스캔 가이드 */}
-          {showCapture && (
-            <CameraCapture
-              onImageSelected={async (src) => {
-                setShowCapture(false);
-                await extractCardInfo(src);
-              }}
-              onBatchSelected={handleBatchProcess}
-              onClose={() => setShowCapture(false)}
-              onDualSideSelected={handleDualSideSelected}
-              onManualInput={() => {
-                setShowCapture(false);
-                setTextInputValue('');
-                setShowTextInput(true);
-              }}
-            />
-          )}
-
-          {/* 텍스트 입력 모달: 붙여넣은 텍스트에서 AI가 필드를 추출 */}
-          {showTextInput && (
-            <Sheet
-              title={(
-                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <FileText size={18} className="color-violet" />
-                  텍스트로 명함 입력
-                </span>
-              )}
-              onClose={() => { if (!isExtracting) setShowTextInput(false); }}
-              maxWidth="520px"
-              footer={(
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {user && (
                 <>
-                  <button
-                    type="button"
-                    onClick={() => setShowTextInput(false)}
-                    className="btn btn-secondary"
-                    disabled={isExtracting}
-                  >
-                    취소
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!textInputValue.trim() || isExtracting}
-                    onClick={() => extractCardFromText(textInputValue)}
-                    className="btn btn-primary"
-                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                  >
-                    <Sparkles size={14} />
-                    {isExtracting ? '분석 중...' : 'AI로 인식'}
+                  <div className="user-profile-header">
+                    <User size={14} className="color-violet" />
+                    <span className="user-email-text">{user.email}</span>
+                    <button onClick={handleSignOut} className="signout-btn" title="로그아웃">
+                      <LogOut size={16} />
+                    </button>
+                  </div>
+                  <button onClick={() => setShowSettings(true)} className="settings-btn" title="설정">
+                    <Settings size={20} />
                   </button>
                 </>
               )}
-            >
-              <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px', lineHeight: 1.5 }}>
-                이메일 서명, 채팅 메시지 등에서 복사한 명함 정보를 붙여넣으세요. AI가 이름·회사·연락처 등을 자동으로 인식해 채워 넣습니다.
-              </p>
-              <div className="form-group">
-                <textarea
-                  autoFocus
-                  value={textInputValue}
-                  onChange={(e) => setTextInputValue(e.target.value)}
-                  placeholder={'예)\n홍길동 부장\n어쿠스틱 이엔지\n02-1234-5678\n010-9876-5432\nhong@acoustic.co.kr\n서울시 강남구 테헤란로 123'}
-                  className="premium-input"
-                  rows={10}
-                  style={{
-                    width: '100%',
-                    resize: 'vertical',
-                    minHeight: '180px',
-                    fontFamily: 'system-ui, -apple-system, sans-serif',
-                    lineHeight: 1.5,
-                  }}
-                  disabled={isExtracting}
-                />
-                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', textAlign: 'right' }}>
-                  {textInputValue.length} / 8000
+            </div>
+          </header>
+
+          {/* Supabase 미연결 경고 */}
+          {!supabaseReady && !initialLoading && (
+            <div className="alert-banner">
+              <div className="alert-icon-box">
+                <AlertCircle size={18} />
+              </div>
+              <div className="alert-content">
+                <h4>Supabase 데이터베이스 연동이 필요합니다</h4>
+                <p>명함을 저장하고 클라우드 동기화를 진행하기 위해 Supabase 프로젝트 키가 필요합니다.</p>
+                <button onClick={() => setShowSettings(true)} className="alert-link-btn">
+                  연동 키 설정하러 가기
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 로그인 화면 */}
+          {supabaseReady && !user && !initialLoading && (
+            <AuthPanel
+              email={authEmail}
+              password={authPassword}
+              loading={loading}
+              onEmailChange={setAuthEmail}
+              onPasswordChange={setAuthPassword}
+              onSubmit={handleAuthSubmit}
+            />
+          )}
+          {/* 메인 콘텐츠 영역 (로그인 완료 시 노출) */}
+          {user && (
+            <main style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+              {/* 검색 및 명함 추가 바 */}
+              <div className="actions-bar">
+                <div className="search-wrapper">
+                  <Search size={18} className="search-icon" />
+                  <input
+                    type="text"
+                    placeholder="이름, 회사명, 이메일, 전화번호 검색..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="premium-input search-input"
+                  />
                 </div>
-              </div>
-            </Sheet>
-          )}
-
-          {/* OCR 데이터 파싱 중 로딩 상태 (단일) */}
-          {isExtracting && (
-            <div className="loading-overlay">
-              <div className="spinner-relative">
-                <div className="spinner"></div>
-                <Sparkles size={24} className="spinner-icon" />
-              </div>
-              <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#fff', marginBottom: '4px' }}>인공지능 정보 분석 중</h3>
-              <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>명함 이미지로부터 이름, 연락처 등을 식별하고 있습니다...</p>
-            </div>
-          )}
-
-        {/* 배치 처리 진행 중 오버레이 */}
-        {batchProcessing && (
-          <div className="loading-overlay">
-            <div className="spinner-relative">
-              <div className="spinner"></div>
-              <Sparkles size={24} className="spinner-icon" />
-            </div>
-            <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#fff', marginBottom: '4px' }}>
-              일괄 분석 중 ({batchProgress.current}/{batchProgress.total})
-            </h3>
-            <div style={{ width: '200px', height: '6px', background: 'rgba(255,255,255,0.15)', borderRadius: '3px', marginTop: '12px', overflow: 'hidden' }}>
-              <div style={{
-                width: `${(batchProgress.current / batchProgress.total) * 100}%`,
-                height: '100%',
-                background: 'linear-gradient(90deg, #6366f1, #a855f7)',
-                borderRadius: '3px',
-                transition: 'width 0.3s ease'
-              }} />
-            </div>
-            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '8px' }}>
-              여러 장을 동시에 분석 중입니다... 잠시만 기다려 주세요.
-            </p>
-          </div>
-        )}
-
-        {/* 배치 처리 결과 목록 */}
-        {batchResults.length > 0 && !editingCard && (
-          <BatchResults
-            results={batchResults}
-            loading={loading}
-            onSelect={handleSelectBatchResult}
-            onSaveAll={handleSaveBatchAll}
-            onClose={() => setBatchResults([])}
-          />
-        )}
-
-        {/* 중복 명함 확인 모달 */}
-        {duplicateInfo && (
-          <DuplicateDialog
-            existingCard={duplicateInfo.existingCard}
-            newCardData={duplicateInfo.newCardData}
-            loading={loading}
-            onUpdate={handleDuplicateUpdate}
-            onAddNew={handleDuplicateAddNew}
-            onCancel={() => setDuplicateInfo(null)}
-          />
-        )}
-
-        {/* 명함 정보 상세 입력 및 교정 (OCR 완료 후) */}
-        {editingCard && !isExtracting && (
-          <CardEditForm
-            card={editingCard}
-            loading={loading}
-            formRef={editFormRef}
-            onChange={(patch) => setEditingCard(prev => ({ ...prev, ...patch }))}
-            onRemoveBack={() => setEditingCard(prev => ({ ...prev, back_image_url: null }))}
-            onCancel={() => { setEditingCard(null); setCroppedImage(null); }}
-            onSubmit={handleSaveCard}
-          />
-        )}
-
-        {/* 저장된 명함 목록 */}
-        <section>
-          <div className="group-chip-row">
-            <button
-              type="button"
-              className={`group-chip ${activeGroupId === null ? 'group-chip-active' : ''}`}
-              onClick={() => setActiveGroupId(null)}
-            >
-              전체
-            </button>
-            {groups.map(g => {
-              const c = getGroupColor(g.color);
-              const active = activeGroupId === g.id;
-              return (
+                <button onClick={handleAddNewCard} className="btn btn-primary btn-add">
+                  <Plus size={18} />
+                  <span>새 명함 추가</span>
+                </button>
                 <button
-                  key={g.id}
-                  type="button"
-                  className={`group-chip ${active ? 'group-chip-active' : ''}`}
-                  onClick={() => setActiveGroupId(g.id)}
-                  style={active ? { background: c.bg, borderColor: c.border, color: c.solid } : undefined}
+                  onClick={() => { setTextInputValue(''); setShowTextInput(true); }}
+                  className="btn btn-secondary btn-add"
+                  title="텍스트에서 AI로 인식"
                 >
-                  <span className="group-color-dot" style={{ background: c.solid }} />
-                  {g.name}
+                  <FileText size={18} />
+                  <span>텍스트 입력</span>
                 </button>
-              );
-            })}
-            <button
-              type="button"
-              className={`group-chip ${activeGroupId === 'ungrouped' ? 'group-chip-active' : ''}`}
-              onClick={() => setActiveGroupId('ungrouped')}
-              title="그룹 없는 명함"
-            >
-              그룹 없음
-            </button>
-            <button
-              type="button"
-              className="group-chip group-chip-action"
-              onClick={() => {
-                setNewGroupName('');
-                setNewGroupColor(DEFAULT_GROUP_COLOR.key);
-                setShowCreateGroup(true);
-              }}
-              title="새 그룹 만들기"
-            >
-              <Plus size={12} /> 새 그룹
-            </button>
-            {groups.length > 0 && (
-              <button
-                type="button"
-                className="group-chip group-chip-action"
-                onClick={() => setShowGroupManage(true)}
-                title="그룹 관리"
-              >
-                <Settings size={12} /> 관리
-              </button>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleDesktopFileChange}
+                  accept="image/*"
+                  multiple
+                  style={{ display: 'none' }}
+                />
+              </div>
+
+              {/* 촬영 및 스캔 가이드 */}
+              {showCapture && (
+                <CameraCapture
+                  onImageSelected={async (src) => {
+                    setShowCapture(false);
+                    await extractCardInfo(src);
+                  }}
+                  onBatchSelected={handleBatchProcess}
+                  onClose={() => setShowCapture(false)}
+                  onDualSideSelected={handleDualSideSelected}
+                  onManualInput={() => {
+                    setShowCapture(false);
+                    setTextInputValue('');
+                    setShowTextInput(true);
+                  }}
+                />
+              )}
+
+              {/* 텍스트 입력 모달: 붙여넣은 텍스트에서 AI가 필드를 추출 */}
+              {showTextInput && (
+                <Sheet
+                  title={(
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <FileText size={18} className="color-violet" />
+                      텍스트로 명함 입력
+                    </span>
+                  )}
+                  onClose={() => { if (!isExtracting) setShowTextInput(false); }}
+                  maxWidth="520px"
+                  footer={(
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setShowTextInput(false)}
+                        className="btn btn-secondary"
+                        disabled={isExtracting}
+                      >
+                        취소
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!textInputValue.trim() || isExtracting}
+                        onClick={() => extractCardFromText(textInputValue)}
+                        className="btn btn-primary"
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                      >
+                        <Sparkles size={14} />
+                        {isExtracting ? '분석 중...' : 'AI로 인식'}
+                      </button>
+                    </>
+                  )}
+                >
+                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px', lineHeight: 1.5 }}>
+                    이메일 서명, 채팅 메시지 등에서 복사한 명함 정보를 붙여넣으세요. AI가 이름·회사·연락처 등을 자동으로 인식해 채워 넣습니다.
+                  </p>
+                  <div className="form-group">
+                    <textarea
+                      autoFocus
+                      value={textInputValue}
+                      onChange={(e) => setTextInputValue(e.target.value)}
+                      placeholder={'예)\n홍길동 부장\n어쿠스틱 이엔지\n02-1234-5678\n010-9876-5432\nhong@acoustic.co.kr\n서울시 강남구 테헤란로 123'}
+                      className="premium-input"
+                      rows={10}
+                      style={{
+                        width: '100%',
+                        resize: 'vertical',
+                        minHeight: '180px',
+                        fontFamily: 'system-ui, -apple-system, sans-serif',
+                        lineHeight: 1.5,
+                      }}
+                      disabled={isExtracting}
+                    />
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', textAlign: 'right' }}>
+                      {textInputValue.length} / 8000
+                    </div>
+                  </div>
+                </Sheet>
+              )}
+
+              {/* OCR 데이터 파싱 중 로딩 상태 (단일) */}
+              {isExtracting && (
+                <div className="loading-overlay">
+                  <div className="spinner-relative">
+                    <div className="spinner"></div>
+                    <Sparkles size={24} className="spinner-icon" />
+                  </div>
+                  <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#fff', marginBottom: '4px' }}>인공지능 정보 분석 중</h3>
+                  <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>명함 이미지로부터 이름, 연락처 등을 식별하고 있습니다...</p>
+                </div>
+              )}
+
+            {/* 배치 처리 진행 중 오버레이 */}
+            {batchProcessing && (
+              <div className="loading-overlay">
+                <div className="spinner-relative">
+                  <div className="spinner"></div>
+                  <Sparkles size={24} className="spinner-icon" />
+                </div>
+                <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#fff', marginBottom: '4px' }}>
+                  일괄 분석 중 ({batchProgress.current}/{batchProgress.total})
+                </h3>
+                <div style={{ width: '200px', height: '6px', background: 'rgba(255,255,255,0.15)', borderRadius: '3px', marginTop: '12px', overflow: 'hidden' }}>
+                  <div style={{
+                    width: `${(batchProgress.current / batchProgress.total) * 100}%`,
+                    height: '100%',
+                    background: 'linear-gradient(90deg, #6366f1, #a855f7)',
+                    borderRadius: '3px',
+                    transition: 'width 0.3s ease'
+                  }} />
+                </div>
+                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '8px' }}>
+                  여러 장을 동시에 분석 중입니다... 잠시만 기다려 주세요.
+                </p>
+              </div>
             )}
-            <button
-              type="button"
-              className={`group-chip group-chip-action ${selectionMode ? 'group-chip-active' : ''}`}
-              onClick={() => {
-                if (selectionMode) exitSelectionMode();
-                else setSelectionMode(true);
-              }}
-              title={selectionMode ? '선택 모드 종료' : '명함 다중 선택'}
-            >
-              <Check size={12} /> {selectionMode ? '선택 종료' : '선택'}
-            </button>
-          </div>
 
-          <CardList
-            groupedByDate={groupedByDate}
-            totalCount={filteredCards.length}
-            initialLoading={initialLoading}
-            selectionMode={selectionMode}
-            selectedCardIds={selectedCardIds}
-            resolveGroupBadges={resolveGroupBadges}
-            onActivateCard={handleActivateCard}
-          />
-        </section>
-      </main>
-      )}
-
-      {/* 이미지 조절 크로퍼 */}
-      {selectedImage && (
-        <ImageCropper
-          imageSrc={selectedImage}
-          onCropComplete={handleCropComplete}
-          onCancel={() => {
-            if (dualPending) {
-              // 양면 흐름 중단: 모든 상태를 초기화하고 카메라 재진입 유도
-              setDualPending(null);
-              setSelectedImage(null);
-            } else {
-              setSelectedImage(null);
-            }
-          }}
-          stageLabel={
-            dualPending
-              ? (dualPending.croppedFront ? '뒷면 트림' : '앞면 트림')
-              : undefined
-          }
-        />
-      )}
-
-      {/* 상세 보기 모달 */}
-      {viewingCard && (
-        <div
-          className="modal-overlay"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setViewingCard(null);
-          }}
-        >
-          <div className="modal-content">
-            <div className="modal-header">
-              <h3>명함 상세 카드</h3>
-              <button onClick={() => setViewingCard(null)} className="modal-close-btn">
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="modal-body">
-              <CardDetail
-                card={viewingCard}
-                groups={groups}
-                activeGroupIds={cardGroupMap[viewingCard.id] || []}
-                onToggleGroup={toggleCardGroup}
-                onOpenImage={setLightboxImage}
+            {/* 배치 처리 결과 목록 */}
+            {batchResults.length > 0 && !editingCard && (
+              <BatchResults
+                results={batchResults}
+                loading={loading}
+                onSelect={handleSelectBatchResult}
+                onSaveAll={handleSaveBatchAll}
+                onClose={() => setBatchResults([])}
               />
-            </div>
+            )}
 
-            <div className="modal-footer">
-              <button
-                onClick={() => {
-                  setEditingCard(viewingCard);
-                  setViewingCard(null);
-                }}
-                className="btn btn-secondary"
-              >
-                <Edit3 size={14} />
-                수정
-              </button>
+            {/* 중복 명함 확인 모달 */}
+            {duplicateInfo && (
+              <DuplicateDialog
+                existingCard={duplicateInfo.existingCard}
+                newCardData={duplicateInfo.newCardData}
+                loading={loading}
+                onUpdate={handleDuplicateUpdate}
+                onAddNew={handleDuplicateAddNew}
+                onCancel={() => setDuplicateInfo(null)}
+              />
+            )}
 
-              <div className="modal-footer-right">
-                <button onClick={() => handleDeleteCard(viewingCard.id)} className="btn btn-danger">
-                  <Trash2 size={14} />
-                  삭제
+            {/* 명함 정보 상세 입력 및 교정 (OCR 완료 후) */}
+            {editingCard && !isExtracting && (
+              <CardEditForm
+                card={editingCard}
+                loading={loading}
+                formRef={editFormRef}
+                onChange={(patch) => setEditingCard(prev => ({ ...prev, ...patch }))}
+                onRemoveBack={() => setEditingCard(prev => ({ ...prev, back_image_url: null }))}
+                onCancel={() => { setEditingCard(null); setCroppedImage(null); }}
+                onSubmit={handleSaveCard}
+              />
+            )}
+
+            {/* 저장된 명함 목록 */}
+            <section>
+              <div className="group-chip-row group-chip-filters">
+                <button
+                  type="button"
+                  className={`group-chip ${activeGroupId === null ? 'group-chip-active' : ''}`}
+                  onClick={() => setActiveGroupId(null)}
+                >
+                  전체
                 </button>
-
-                {viewingCard.hubspot_id ? (
-                  <button 
-                    onClick={() => syncToHubSpot(viewingCard)} 
-                    disabled={loading} 
-                    className="btn" 
-                    style={{ background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.25)', color: '#34d399' }}
+                {groups.map(g => {
+                  const c = getGroupColor(g.color);
+                  const active = activeGroupId === g.id;
+                  return (
+                    <button
+                      key={g.id}
+                      type="button"
+                      className={`group-chip ${active ? 'group-chip-active' : ''}`}
+                      onClick={() => setActiveGroupId(g.id)}
+                      style={active ? { background: c.bg, borderColor: c.border, color: c.solid } : undefined}
+                    >
+                      <span className="group-color-dot" style={{ background: c.solid }} />
+                      {g.name}
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  className={`group-chip ${activeGroupId === 'ungrouped' ? 'group-chip-active' : ''}`}
+                  onClick={() => setActiveGroupId('ungrouped')}
+                  title="그룹 없는 명함"
+                >
+                  그룹 없음
+                </button>
+                <button
+                  type="button"
+                  className="group-chip group-chip-action"
+                  onClick={() => {
+                    setNewGroupName('');
+                    setNewGroupColor(DEFAULT_GROUP_COLOR.key);
+                    setShowCreateGroup(true);
+                  }}
+                  title="새 그룹 만들기"
+                >
+                  <Plus size={12} /> 새 그룹
+                </button>
+                {groups.length > 0 && (
+                  <button
+                    type="button"
+                    className="group-chip group-chip-action"
+                    onClick={() => setShowGroupManage(true)}
+                    title="그룹 관리"
                   >
-                    <Check size={14} />
-                    HubSpot 업데이트
-                  </button>
-                ) : (
-                  <button onClick={() => syncToHubSpot(viewingCard)} disabled={loading} className="btn btn-hubspot">
-                    <ExternalLink size={14} />
-                    HubSpot에 등록
+                    <Settings size={12} /> 관리
                   </button>
                 )}
               </div>
+
+              <div className="group-chip-row">
+                <button
+                  type="button"
+                  className={`group-chip group-chip-action ${selectionMode ? 'group-chip-active' : ''}`}
+                  onClick={() => {
+                    if (selectionMode) exitSelectionMode();
+                    else setSelectionMode(true);
+                  }}
+                  title={selectionMode ? '선택 모드 종료' : '명함 다중 선택'}
+                >
+                  <Check size={12} /> {selectionMode ? '선택 종료' : '선택'}
+                </button>
+              </div>
+
+              <CardList
+                groupedByDate={groupedByDate}
+                totalCount={filteredCards.length}
+                initialLoading={initialLoading}
+                selectionMode={selectionMode}
+                selectedCardIds={selectedCardIds}
+                resolveGroupBadges={resolveGroupBadges}
+                onActivateCard={handleActivateCard}
+              />
+            </section>
+          </main>
+          )}
+
+          {/* 이미지 조절 크로퍼 */}
+          {selectedImage && (
+            <ImageCropper
+              imageSrc={selectedImage}
+              onCropComplete={handleCropComplete}
+              onCancel={() => {
+                if (dualPending) {
+                  // 양면 흐름 중단: 모든 상태를 초기화하고 카메라 재진입 유도
+                  setDualPending(null);
+                  setSelectedImage(null);
+                } else {
+                  setSelectedImage(null);
+                }
+              }}
+              stageLabel={
+                dualPending
+                  ? (dualPending.croppedFront ? '뒷면 트림' : '앞면 트림')
+                  : undefined
+              }
+            />
+          )}
+
+          {/* 상세 보기 모달 */}
+          {viewingCard && (
+            <div
+              className="modal-overlay"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setViewingCard(null);
+              }}
+            >
+              <div className="modal-content">
+                <div className="modal-header">
+                  <h3>명함 상세 카드</h3>
+                  <button onClick={() => setViewingCard(null)} className="modal-close-btn">
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <div className="modal-body">
+                  <CardDetail
+                    card={viewingCard}
+                    groups={groups}
+                    activeGroupIds={cardGroupMap[viewingCard.id] || []}
+                    onToggleGroup={toggleCardGroup}
+                    onOpenImage={setLightboxImage}
+                  />
+                </div>
+
+                <div className="modal-footer">
+                  <button
+                    onClick={() => {
+                      setEditingCard(viewingCard);
+                      setViewingCard(null);
+                    }}
+                    className="btn btn-secondary"
+                  >
+                    <Edit3 size={14} />
+                    수정
+                  </button>
+
+                  <div className="modal-footer-right">
+                    <button onClick={() => handleDeleteCard(viewingCard.id)} className="btn btn-danger">
+                      <Trash2 size={14} />
+                      삭제
+                    </button>
+
+                    {viewingCard.hubspot_id ? (
+                      <button 
+                        onClick={() => syncToHubSpot(viewingCard)} 
+                        disabled={loading} 
+                        className="btn" 
+                        style={{ background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.25)', color: '#34d399' }}
+                      >
+                        <Check size={14} />
+                        HubSpot 업데이트
+                      </button>
+                    ) : (
+                      <button onClick={() => syncToHubSpot(viewingCard)} disabled={loading} className="btn btn-hubspot">
+                        <ExternalLink size={14} />
+                        HubSpot에 등록
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          )}
 
-      {/* 설정 모달 */}
-      {showSettings && (
-        <SettingsModal
-          settings={settings}
-          onChange={(patch) => setSettings(prev => ({ ...prev, ...patch }))}
-          onSubmit={handleSaveSettings}
-          onClose={() => setShowSettings(false)}
-        />
-      )}
+          {/* 설정 모달 */}
+          {showSettings && (
+            <SettingsModal
+              settings={settings}
+              onChange={(patch) => setSettings(prev => ({ ...prev, ...patch }))}
+              onSubmit={handleSaveSettings}
+              onClose={() => setShowSettings(false)}
+            />
+          )}
 
-      {/* 다중 선택 액션바 */}
-      {selectionMode && (
-        <div className="selection-action-bar">
-          <div className="selection-action-bar-inner">
-            <span className="selection-count">{selectedCardIds.size}개 선택됨</span>
-            <div className="selection-action-buttons">
-              <button
-                type="button"
-                onClick={() => {
-                  if (groups.length === 0) {
-                    toast.info('먼저 그룹을 만들어 주세요.');
-                    return;
-                  }
-                  if (selectedCardIds.size === 0) {
-                    toast.info('명함을 한 개 이상 선택해 주세요.');
-                    return;
-                  }
-                  setShowBulkAssign(true);
+          {/* 다중 선택 액션바 */}
+          {selectionMode && (
+            <div className="selection-action-bar">
+              <div className="selection-action-bar-inner">
+                <span className="selection-count">{selectedCardIds.size}개 선택됨</span>
+                <div className="selection-action-buttons">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (groups.length === 0) {
+                        toast.info('먼저 그룹을 만들어 주세요.');
+                        return;
+                      }
+                      if (selectedCardIds.size === 0) {
+                        toast.info('명함을 한 개 이상 선택해 주세요.');
+                        return;
+                      }
+                      setShowBulkAssign(true);
+                    }}
+                    className="btn btn-primary"
+                  >
+                    그룹 지정
+                  </button>
+                  <button type="button" onClick={exitSelectionMode} className="btn btn-secondary">
+                    취소
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 일괄 그룹 지정 모달 */}
+          {showBulkAssign && (
+            <BulkAssignModal
+              groups={groups}
+              selectedIds={Array.from(selectedCardIds)}
+              memberCountOf={(groupId) => Array.from(selectedCardIds).filter(id => (cardGroupMap[id] || []).includes(groupId)).length}
+              onAssign={bulkAssignGroup}
+              onRemove={bulkRemoveFromGroup}
+              onClose={() => setShowBulkAssign(false)}
+            />
+          )}
+
+          {/* 그룹 관리 모달 */}
+          {showGroupManage && (
+            <GroupManageModal
+              groups={groups}
+              groupCounts={groupCounts}
+              editingGroupId={editingGroupId}
+              editingGroupName={editingGroupName}
+              onStartRename={(g) => { setEditingGroupId(g.id); setEditingGroupName(g.name); }}
+              onChangeRenameValue={setEditingGroupName}
+              onCommitRename={async (id) => { await renameGroup(id, editingGroupName); setEditingGroupId(null); }}
+              onCancelRename={() => setEditingGroupId(null)}
+              onSetColor={setGroupColor}
+              onDelete={deleteGroup}
+              onCreateNew={() => { setNewGroupName(''); setNewGroupColor(DEFAULT_GROUP_COLOR.key); setShowCreateGroup(true); }}
+              onClose={() => { setShowGroupManage(false); setEditingGroupId(null); }}
+            />
+          )}
+
+          {/* 그룹 생성 모달 */}
+          {showCreateGroup && (
+            <CreateGroupModal
+              name={newGroupName}
+              color={newGroupColor}
+              onNameChange={setNewGroupName}
+              onColorChange={setNewGroupColor}
+              onCreate={async () => { await createGroup(newGroupName, newGroupColor); setShowCreateGroup(false); }}
+              onClose={() => setShowCreateGroup(false)}
+            />
+          )}
+
+          {/* 이미지 라이트박스 (배경 클릭하거나 X 누르면 닫힘) */}
+          {lightboxImage && (
+            <div
+              onClick={() => setLightboxImage(null)}
+              style={{
+                position: 'fixed',
+                inset: 0,
+                zIndex: 300,
+                background: 'rgba(0, 0, 0, 0.92)',
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '24px',
+                cursor: 'zoom-out',
+                animation: 'fadeIn 0.18s ease-out',
+              }}
+            >
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 'calc(env(safe-area-inset-top, 0px) + 16px)',
+                  right: '20px',
+                  display: 'flex',
+                  gap: '10px',
+                  zIndex: 2,
                 }}
-                className="btn btn-primary"
               >
-                그룹 지정
-              </button>
-              <button type="button" onClick={exitSelectionMode} className="btn btn-secondary">
-                취소
-              </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    saveImageToDevice(lightboxImage).catch((err) => toast.error(err.message));
+                  }}
+                  aria-label="이미지 저장"
+                  title="앨범에 저장"
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '50%',
+                    border: 'none',
+                    background: 'rgba(255, 255, 255, 0.12)',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Download size={18} />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setLightboxImage(null);
+                  }}
+                  aria-label="닫기"
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '50%',
+                    border: 'none',
+                    background: 'rgba(255, 255, 255, 0.12)',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <ZoomableImage src={lightboxImage} alt="확대 이미지" />
+              </div>
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  fontSize: '11px',
+                  color: 'rgba(255, 255, 255, 0.55)',
+                  background: 'rgba(0, 0, 0, 0.35)',
+                  padding: '6px 12px',
+                  borderRadius: '999px',
+                  pointerEvents: 'none',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                두 손가락으로 확대 · 더블탭으로 줌
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
-
-      {/* 일괄 그룹 지정 모달 */}
-      {showBulkAssign && (
-        <BulkAssignModal
-          groups={groups}
-          selectedIds={Array.from(selectedCardIds)}
-          memberCountOf={(groupId) => Array.from(selectedCardIds).filter(id => (cardGroupMap[id] || []).includes(groupId)).length}
-          onAssign={bulkAssignGroup}
-          onRemove={bulkRemoveFromGroup}
-          onClose={() => setShowBulkAssign(false)}
-        />
-      )}
-
-      {/* 그룹 관리 모달 */}
-      {showGroupManage && (
-        <GroupManageModal
-          groups={groups}
-          groupCounts={groupCounts}
-          editingGroupId={editingGroupId}
-          editingGroupName={editingGroupName}
-          onStartRename={(g) => { setEditingGroupId(g.id); setEditingGroupName(g.name); }}
-          onChangeRenameValue={setEditingGroupName}
-          onCommitRename={async (id) => { await renameGroup(id, editingGroupName); setEditingGroupId(null); }}
-          onCancelRename={() => setEditingGroupId(null)}
-          onSetColor={setGroupColor}
-          onDelete={deleteGroup}
-          onCreateNew={() => { setNewGroupName(''); setNewGroupColor(DEFAULT_GROUP_COLOR.key); setShowCreateGroup(true); }}
-          onClose={() => { setShowGroupManage(false); setEditingGroupId(null); }}
-        />
-      )}
-
-      {/* 그룹 생성 모달 */}
-      {showCreateGroup && (
-        <CreateGroupModal
-          name={newGroupName}
-          color={newGroupColor}
-          onNameChange={setNewGroupName}
-          onColorChange={setNewGroupColor}
-          onCreate={async () => { await createGroup(newGroupName, newGroupColor); setShowCreateGroup(false); }}
-          onClose={() => setShowCreateGroup(false)}
-        />
-      )}
-
-      {/* 이미지 라이트박스 (배경 클릭하거나 X 누르면 닫힘) */}
-      {lightboxImage && (
-        <div
-          onClick={() => setLightboxImage(null)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 300,
-            background: 'rgba(0, 0, 0, 0.92)',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '24px',
-            cursor: 'zoom-out',
-            animation: 'fadeIn 0.18s ease-out',
-          }}
-        >
-          <div
-            style={{
-              position: 'absolute',
-              top: 'calc(env(safe-area-inset-top, 0px) + 16px)',
-              right: '20px',
-              display: 'flex',
-              gap: '10px',
-              zIndex: 2,
-            }}
-          >
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                saveImageToDevice(lightboxImage).catch((err) => toast.error(err.message));
-              }}
-              aria-label="이미지 저장"
-              title="앨범에 저장"
-              style={{
-                width: '40px',
-                height: '40px',
-                borderRadius: '50%',
-                border: 'none',
-                background: 'rgba(255, 255, 255, 0.12)',
-                color: '#ffffff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-              }}
-            >
-              <Download size={18} />
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setLightboxImage(null);
-              }}
-              aria-label="닫기"
-              style={{
-                width: '40px',
-                height: '40px',
-                borderRadius: '50%',
-                border: 'none',
-                background: 'rgba(255, 255, 255, 0.12)',
-                color: '#ffffff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-              }}
-            >
-              <X size={20} />
-            </button>
-          </div>
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <ZoomableImage src={lightboxImage} alt="확대 이미지" />
-          </div>
-          <div
-            style={{
-              position: 'absolute',
-              bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              fontSize: '11px',
-              color: 'rgba(255, 255, 255, 0.55)',
-              background: 'rgba(0, 0, 0, 0.35)',
-              padding: '6px 12px',
-              borderRadius: '999px',
-              pointerEvents: 'none',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            두 손가락으로 확대 · 더블탭으로 줌
-          </div>
-        </div>
-      )}
-    </div>
+      detail={null}
+    />
   );
 }

@@ -1290,3 +1290,138 @@ body {
   from { transform: translateY(100%); }
   to { transform: translateY(0); }
 }
+
+/* App shell — 모바일 단일 컬럼, 1024px 사이드바, 1280px 상세 패널 */
+.app-shell {
+  width: 100%;
+  display: block;
+}
+
+.app-shell-sidebar,
+.app-shell-detail {
+  display: none;
+}
+
+@media (min-width: 1024px) {
+  html, body { height: 100%; overflow: hidden; }
+
+  .app-shell {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    height: 100dvh;
+  }
+  .app-shell-sidebar {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+    border-right: 1px solid var(--glass-border);
+    padding: 20px 14px calc(20px + env(safe-area-inset-bottom, 0px));
+  }
+  .app-shell-main {
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  /* 셸 안에서는 중앙 컬럼 제약을 푼다 */
+  .app-shell-main .app-container {
+    max-width: none;
+    padding-top: 20px;
+  }
+  /* 사이드바로 옮겨간 것들은 셸 구간에서 숨긴다 */
+  .app-shell-main .header-container,
+  .app-shell-main .group-chip-filters {
+    display: none;
+  }
+}
+
+@media (min-width: 1280px) {
+  .app-shell {
+    grid-template-columns: 240px minmax(0, 1fr) 380px;
+  }
+  .app-shell-detail {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+    border-left: 1px solid var(--glass-border);
+    padding: 20px;
+  }
+}
+
+/* Sidebar nav */
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 18px;
+}
+
+.sidebar-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.sidebar-nav-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+
+.sidebar-nav-item-active {
+  background: rgba(99, 102, 241, 0.16);
+  color: #c7d2fe;
+}
+
+.sidebar-nav-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-nav-count {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.sidebar-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  padding: 0 10px;
+  margin: 20px 0 6px;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.sidebar-user-email {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 0 10px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
