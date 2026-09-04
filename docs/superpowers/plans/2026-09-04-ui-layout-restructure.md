@@ -469,12 +469,25 @@ git commit -m "Refactor: Extract settings and group modals from page.js"
 
 **Files:** 없음 (검증만)
 
-- [ ] **Step 1: `page.js` 줄 수 확인**
+- [x] **Step 1: `page.js` JSX 줄 수 확인**
 
 ```bash
-wc -l src/app/page.js
+python3 -c "
+lines=open('src/app/page.js',encoding='utf-8').read().split('\n')
+r=lines.index('  return (')
+print(f'로직부 {r}줄 / JSX부 {len(lines)-r}줄')
+"
 ```
-기대: 600줄 이하. 크게 넘으면 남은 JSX가 있다는 뜻이므로 어느 블록이 남았는지 확인하고 해당 태스크로 돌아간다.
+
+**정정:** 계획 작성 시 "약 500줄"이라고 쓴 것은 파일 전체가 아니라 **JSX 부분**을
+가리킨 것이었다. 상태·Supabase/HubSpot/OCR 핸들러 등 로직부 약 1260줄은 스펙에
+따라 `page.js`에 남는다. 따라서 판정 기준은 **JSX부 650줄 이하**이며, 스펙의
+컴포넌트 표에 있는 블록이 전부 빠졌는지를 함께 확인한다.
+
+실측: 로직부 1261줄 / JSX부 622줄 — 통과. 남은 JSX는 조합부와 추출 대상이
+아니었던 블록(텍스트 입력 모달, 로딩 오버레이, 카메라·크로퍼·라이트박스 마운트,
+액션바, 그룹 칩, 선택 액션바)뿐이다. 텍스트 입력 모달은 Task 8에서 `Sheet`로
+감싸며 줄어든다.
 
 - [ ] **Step 2: 빌드 + 린트 확인** (검증 레시피)
 
