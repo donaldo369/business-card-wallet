@@ -155,6 +155,7 @@ export default function Home() {
   const [authPassword, setAuthPassword] = useState('');
   const fileInputRef = useRef(null);
   const editFormRef = useRef(null);
+  const hasScrolledToFormRef = useRef(false);
 
   const handleAddNewCard = () => {
     const isMobile = typeof navigator !== 'undefined' && /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -245,10 +246,17 @@ export default function Home() {
   }, []);
 
   // 카메라/파일/텍스트 입력으로 편집 폼이 열리면 자동으로 폼 위치로 스크롤 (모바일에서 페이지 하단에 렌더되기 때문에 필요)
+  // 폼이 열리는 순간 한 번만 스크롤한다. editingCard는 입력할 때마다 바뀌므로
+  // 그대로 두면 타이핑 중에 화면이 폼 상단으로 되돌아간다.
   useEffect(() => {
-    if (editingCard && !isExtracting && editFormRef.current) {
-      editFormRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const formOpen = !!editingCard && !isExtracting;
+    if (!formOpen) {
+      hasScrolledToFormRef.current = false;
+      return;
     }
+    if (hasScrolledToFormRef.current || !editFormRef.current) return;
+    hasScrolledToFormRef.current = true;
+    editFormRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [editingCard, isExtracting]);
 
   const handleSaveSettings = (e) => {
@@ -1260,7 +1268,7 @@ export default function Home() {
       <header className="header-container">
         <div className="logo-section">
           <div className="logo-icon-box">
-            <Smartphone size={22} className="text-white" />
+            <Smartphone size={22} style={{ color: '#fff' }} />
           </div>
           <div className="logo-title-group">
             <h1>Smart Card Wallet</h1>
