@@ -1512,3 +1512,53 @@ body {
   .group-chip-row::-webkit-scrollbar { display: none; }
   .group-chip { flex-shrink: 0; }
 }
+
+/* 목록 밀도 토글 */
+.density-toggle {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  flex-shrink: 0;
+}
+
+.density-toggle-btn {
+  padding: 5px 12px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.density-toggle-btn-active {
+  background: rgba(99, 102, 241, 0.22);
+  color: #c7d2fe;
+}
+
+.cards-grid-compact .card-item {
+  padding: 10px 14px;
+  gap: 12px;
+  align-items: center;
+}
+
+.cards-grid-compact .card-thumb {
+  width: 64px;
+  height: 40px;
+}
+
+.cards-grid-compact .card-meta-list {
+  display: none;
+}
+
+.cards-grid-compact .card-company {
+  margin-bottom: 0;
+}
+
+.cards-grid-compact .card-item:hover {
+  transform: none;
+}
