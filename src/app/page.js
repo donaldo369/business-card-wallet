@@ -1409,18 +1409,29 @@ export default function Home() {
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className="premium-input search-input"
                     />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery('')}
+                        className="search-clear-btn"
+                        aria-label="검색어 지우기"
+                      >
+                        <X size={16} />
+                      </button>
+                    )}
                   </div>
-                  <button onClick={handleAddNewCard} className="btn btn-primary btn-add">
+                  <button onClick={handleAddNewCard} className="btn btn-primary btn-add btn-add-desktop">
                     <Plus size={18} />
                     <span>새 명함 추가</span>
                   </button>
                   <button
                     onClick={() => { setTextInputValue(''); setShowTextInput(true); }}
-                    className="btn btn-secondary btn-add"
+                    className="btn btn-secondary btn-add btn-text-input"
                     title="텍스트에서 AI로 인식"
+                    aria-label="텍스트 입력"
                   >
                     <FileText size={18} />
-                    <span>텍스트 입력</span>
+                    <span className="btn-add-label">텍스트 입력</span>
                   </button>
                   <input
                     type="file"
@@ -1659,6 +1670,8 @@ export default function Home() {
                 <CardList
                   groupedByDate={groupedByDate}
                   totalCount={filteredCards.length}
+                  searchQuery={searchQuery}
+                  onClearSearch={() => setSearchQuery('')}
                   initialLoading={initialLoading}
                   selectionMode={selectionMode}
                   selectedCardIds={selectedCardIds}
@@ -1899,6 +1912,12 @@ export default function Home() {
           </div>
         )) : null}
         />
+
+      {user && !selectionMode && (
+        <button type="button" onClick={handleAddNewCard} className="fab" aria-label="새 명함 추가">
+          <Plus size={26} />
+        </button>
+      )}
 
       {viewingCard && !isDetailPane && (
         <Sheet

@@ -1442,3 +1442,73 @@ body {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
+
+/* 검색 지우기 버튼 */
+.search-clear-btn {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.search-clear-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+/* FAB — 단일 컬럼 구간의 주 액션 */
+.fab {
+  position: fixed;
+  right: calc(env(safe-area-inset-right, 0px) + 18px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+  z-index: 120;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  border: none;
+  background: var(--primary-gradient);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 26px rgba(99, 102, 241, 0.45);
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+
+.fab:active { transform: scale(0.94); }
+
+@media (min-width: 1024px) {
+  .fab { display: none; }
+}
+
+@media (max-width: 1023px) {
+  /* 주 액션은 FAB 이 맡으므로 액션바의 추가 버튼은 감춘다 */
+  .actions-bar .btn-add-desktop { display: none; }
+  .actions-bar { flex-direction: row; }
+  .actions-bar .btn-text-input {
+    flex-shrink: 0;
+    padding: 0 16px;
+  }
+  .actions-bar .btn-add-label { display: none; }
+
+  /* 그룹 칩은 줄바꿈 대신 가로 스크롤 */
+  .group-chip-row {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 24px), transparent 100%);
+  }
+  .group-chip-row::-webkit-scrollbar { display: none; }
+  .group-chip { flex-shrink: 0; }
+}
