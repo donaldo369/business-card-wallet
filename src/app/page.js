@@ -11,6 +11,7 @@ import dynamic from 'next/dynamic';
 import { getSupabaseClient } from '../lib/supabase';
 import { useToast } from '../components/Toast';
 import AuthPanel from '../components/AuthPanel';
+import CardList from '../components/CardList';
 import { classifyPhone } from '../lib/phone';
 
 const GROUP_COLORS = [
@@ -1276,6 +1277,18 @@ export default function Home() {
     return Object.entries(groups);
   }, [filteredCards]);
 
+  const resolveGroupBadges = useCallback((cardId) => (
+    (cardGroupMap[cardId] || [])
+      .map(gid => groups.find(g => g.id === gid))
+      .filter(Boolean)
+      .map(g => ({ id: g.id, name: g.name, color: getGroupColor(g.color) }))
+  ), [cardGroupMap, groups]);
+
+  const handleActivateCard = useCallback((card) => {
+    if (selectionMode) toggleCardSelection(card.id);
+    else setViewingCard(card);
+  }, [selectionMode]);
+
 
   return (
     <div className="app-container">
@@ -1903,14 +1916,6 @@ export default function Home() {
 
         {/* 저장된 명함 목록 */}
         <section>
-          <div className="section-header">
-            <h2 className="section-title">
-              <FileText size={18} className="color-violet" />
-              내 명함 지갑
-              <span className="count-badge">{filteredCards.length}개</span>
-            </h2>
-          </div>
-
           <div className="group-chip-row">
             <button
               type="button"
@@ -1978,107 +1983,15 @@ export default function Home() {
             </button>
           </div>
 
-          {initialLoading ? (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: '64px 0' }}>
-              <RefreshCw size={28} className="color-violet" style={{ animation: 'spin 1s infinite linear' }} />
-            </div>
-          ) : filteredCards.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-icon-box">
-                <FileText size={24} />
-              </div>
-              <h3>저장된 명함이 없습니다</h3>
-              <p>"새 명함 추가" 버튼을 눌러 첫 번째 명함을 카메라로 스캔하거나 이미지를 올려보세요.</p>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              {groupedByDate.map(([dateLabel, groupCards]) => (
-                <div key={dateLabel} className="date-group-section">
-                  <div className="date-group-header">
-                    <span className="date-group-title">{dateLabel}</span>
-                    <span className="date-group-count">{groupCards.length}개</span>
-                  </div>
-                  <div className="cards-grid">
-                    {groupCards.map((card) => {
-                      const isSelected = selectedCardIds.has(card.id);
-                      return (
-                      <div
-                        key={card.id}
-                        onClick={() => {
-                          if (selectionMode) toggleCardSelection(card.id);
-                          else setViewingCard(card);
-                        }}
-                        className={`glass card-item ${selectionMode ? 'card-item-selectable' : ''} ${isSelected ? 'card-item-selected' : ''}`}
-                      >
-                        {selectionMode && (
-                          <div className={`card-select-indicator ${isSelected ? 'card-select-indicator-on' : ''}`}>
-                            {isSelected && <Check size={12} />}
-                          </div>
-                        )}
-                        {/* 왼쪽 명함 썸네일 */}
-                        <div className="card-thumb">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={card.image_url} alt={card.name} loading="lazy" decoding="async" />
-                        </div>
-
-                        {/* 오른쪽 정보 */}
-                        <div className="card-info">
-                          <div>
-                            <div className="card-name-group">
-                              <h4 className="card-name">{card.name}</h4>
-                              <span className="card-title">{card.title}</span>
-                            </div>
-                            <p className="card-company">{card.company}</p>
-                          </div>
-
-                          <div className="card-meta-list">
-                            {card.mobile_phone && (
-                              <p className="card-meta-item">
-                                <Phone size={11} />
-                                {card.mobile_phone}
-                              </p>
-                            )}
-                            {card.email && (
-                              <p className="card-meta-item">
-                                <Mail size={11} />
-                                {card.email}
-                              </p>
-                            )}
-                          </div>
-                          {(cardGroupMap[card.id] || []).length > 0 && (
-                            <div className="card-group-badges">
-                              {(cardGroupMap[card.id] || []).map(gid => {
-                                const g = groups.find(x => x.id === gid);
-                                if (!g) return null;
-                                const c = getGroupColor(g.color);
-                                return (
-                                  <span
-                                    key={gid}
-                                    className="card-group-badge"
-                                    style={{ background: c.bg, color: c.solid }}
-                                  >
-                                    {g.name}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* HubSpot 상태 배지 */}
-                        {card.hubspot_id && (
-                          <div className="hubspot-badge" title="HubSpot 동기화됨">
-                            <Check size={14} />
-                          </div>
-                        )}
-                      </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <CardList
+            groupedByDate={groupedByDate}
+            totalCount={filteredCards.length}
+            initialLoading={initialLoading}
+            selectionMode={selectionMode}
+            selectedCardIds={selectedCardIds}
+            resolveGroupBadges={resolveGroupBadges}
+            onActivateCard={handleActivateCard}
+          />
         </section>
       </main>
       )}
