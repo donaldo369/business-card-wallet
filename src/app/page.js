@@ -16,7 +16,11 @@ import CardDetail from '../components/CardDetail';
 import CardEditForm from '../components/CardEditForm';
 import BatchResults from '../components/BatchResults';
 import DuplicateDialog from '../components/DuplicateDialog';
-import { GROUP_COLORS, DEFAULT_GROUP_COLOR, getGroupColor } from '../lib/groupColors';
+import SettingsModal from '../components/SettingsModal';
+import GroupManageModal from '../components/GroupManageModal';
+import CreateGroupModal from '../components/CreateGroupModal';
+import BulkAssignModal from '../components/BulkAssignModal';
+import { DEFAULT_GROUP_COLOR, getGroupColor } from '../lib/groupColors';
 import { classifyPhone } from '../lib/phone';
 
 const CameraCapture = dynamic(() => import('../components/CameraCapture'), { ssr: false });
@@ -1233,6 +1237,15 @@ export default function Home() {
     return Object.entries(groups);
   }, [filteredCards]);
 
+  const groupCounts = React.useMemo(() => {
+    const counts = {};
+    groups.forEach(g => { counts[g.id] = 0; });
+    Object.values(cardGroupMap).forEach(ids => {
+      ids.forEach(id => { if (counts[id] !== undefined) counts[id] += 1; });
+    });
+    return counts;
+  }, [groups, cardGroupMap]);
+
   const resolveGroupBadges = useCallback((cardId) => (
     (cardGroupMap[cardId] || [])
       .map(gid => groups.find(g => g.id === gid))
@@ -1679,98 +1692,12 @@ export default function Home() {
 
       {/* 설정 모달 */}
       {showSettings && (
-        <div
-          className="modal-overlay"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowSettings(false);
-          }}
-        >
-          <div className="modal-content">
-            <div className="modal-header">
-              <h3>시스템 연동 설정</h3>
-              <button onClick={() => setShowSettings(false)} className="modal-close-btn">
-                <X size={16} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveSettings} style={{ display: 'flex', flexDirection: 'column' }}>
-              <div className="modal-body">
-                <div className="form-group">
-                  <label>Supabase URL</label>
-                  <input
-                    type="text"
-                    placeholder="https://your-project.supabase.co"
-                    value={settings.supabaseUrl}
-                    onChange={(e) => setSettings({ ...settings, supabaseUrl: e.target.value })}
-                    className="premium-input"
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>Supabase Anon Key</label>
-                  <input
-                    type="password"
-                    placeholder="eyJhbGciOi..."
-                    value={settings.supabaseAnonKey}
-                    onChange={(e) => setSettings({ ...settings, supabaseAnonKey: e.target.value })}
-                    className="premium-input"
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>Gemini API Key</label>
-                  <input
-                    type="password"
-                    placeholder="AIzaSy..."
-                    value={settings.geminiKey}
-                    onChange={(e) => setSettings({ ...settings, geminiKey: e.target.value })}
-                    className="premium-input"
-                  />
-                  <p style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    명함 OCR 1순위 엔진. 무료 일일 한도 소진 시 Claude로 자동 폴백됩니다. (서버 환경변수 우선)
-                  </p>
-                </div>
-
-                <div className="form-group">
-                  <label>Anthropic (Claude) API Key</label>
-                  <input
-                    type="password"
-                    placeholder="sk-ant-..."
-                    value={settings.anthropicKey}
-                    onChange={(e) => setSettings({ ...settings, anthropicKey: e.target.value })}
-                    className="premium-input"
-                  />
-                  <p style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    Gemini 한도 초과 시 자동 폴백용. Claude Haiku 4.5 사용 (명함 1장 약 4원). 비워두면 폴백 비활성화. (서버 환경변수 우선)
-                  </p>
-                </div>
-
-                <div className="form-group">
-                  <label>HubSpot Private App Token</label>
-                  <input
-                    type="password"
-                    placeholder="pat-na1-..."
-                    value={settings.hubspotToken}
-                    onChange={(e) => setSettings({ ...settings, hubspotToken: e.target.value })}
-                    className="premium-input"
-                  />
-                  <p style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    HubSpot CRM에 연락처를 생성하기 위한 토큰입니다. (서버 환경변수 우선 적용)
-                  </p>
-                </div>
-              </div>
-
-              <div className="modal-footer" style={{ justifyContent: 'flex-end' }}>
-                <button type="button" onClick={() => setShowSettings(false)} className="btn btn-secondary">
-                  취소
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  저장 및 활성화
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <SettingsModal
+          settings={settings}
+          onChange={(patch) => setSettings(prev => ({ ...prev, ...patch }))}
+          onSubmit={handleSaveSettings}
+          onClose={() => setShowSettings(false)}
+        />
       )}
 
       {/* 다중 선택 액션바 */}
@@ -1806,277 +1733,44 @@ export default function Home() {
 
       {/* 일괄 그룹 지정 모달 */}
       {showBulkAssign && (
-        <div
-          className="modal-overlay"
-          onClick={(e) => { if (e.target === e.currentTarget) setShowBulkAssign(false); }}
-        >
-          <div className="modal-content" style={{ maxWidth: '420px' }}>
-            <div className="modal-header">
-              <h3>그룹 선택 ({selectedCardIds.size}개)</h3>
-              <button onClick={() => setShowBulkAssign(false)} className="modal-close-btn">
-                <X size={16} />
-              </button>
-            </div>
-            <div className="modal-body">
-              <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px' }}>
-                탭하면 선택한 명함을 해당 그룹에 추가합니다. 이미 포함된 경우 제외 처리할 수도 있습니다.
-              </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {groups.map(g => {
-                  const ids = Array.from(selectedCardIds);
-                  const memberCount = ids.filter(id => (cardGroupMap[id] || []).includes(g.id)).length;
-                  const allMembers = memberCount === ids.length;
-                  return (
-                    <div
-                      key={g.id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '10px 12px',
-                        borderRadius: '10px',
-                        background: 'rgba(255,255,255,0.04)',
-                      }}
-                    >
-                      <span style={{ flex: 1, fontSize: '14px' }}>{g.name}</span>
-                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                        {memberCount}/{ids.length}
-                      </span>
-                      {!allMembers && (
-                        <button
-                          type="button"
-                          onClick={() => bulkAssignGroup(g.id)}
-                          className="btn btn-primary"
-                          style={{ padding: '6px 12px', fontSize: '12px' }}
-                        >
-                          추가
-                        </button>
-                      )}
-                      {memberCount > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => bulkRemoveFromGroup(g.id)}
-                          className="btn btn-secondary"
-                          style={{ padding: '6px 12px', fontSize: '12px' }}
-                        >
-                          제거
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </div>
+        <BulkAssignModal
+          groups={groups}
+          selectedIds={Array.from(selectedCardIds)}
+          memberCountOf={(groupId) => Array.from(selectedCardIds).filter(id => (cardGroupMap[id] || []).includes(groupId)).length}
+          onAssign={bulkAssignGroup}
+          onRemove={bulkRemoveFromGroup}
+          onClose={() => setShowBulkAssign(false)}
+        />
       )}
 
       {/* 그룹 관리 모달 */}
       {showGroupManage && (
-        <div
-          className="modal-overlay"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              setShowGroupManage(false);
-              setEditingGroupId(null);
-            }
-          }}
-        >
-          <div className="modal-content" style={{ maxWidth: '480px' }}>
-            <div className="modal-header">
-              <h3>그룹 관리</h3>
-              <button
-                onClick={() => { setShowGroupManage(false); setEditingGroupId(null); }}
-                className="modal-close-btn"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div className="modal-body">
-              {groups.length === 0 ? (
-                <p style={{ color: 'var(--text-muted)', fontSize: '13px', textAlign: 'center', padding: '24px 0' }}>
-                  아직 그룹이 없습니다.
-                </p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {groups.map(g => (
-                    <div
-                      key={g.id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '10px 12px',
-                        borderRadius: '10px',
-                        background: 'rgba(255,255,255,0.04)',
-                      }}
-                    >
-                      {editingGroupId === g.id ? (
-                        <>
-                          <input
-                            autoFocus
-                            value={editingGroupName}
-                            onChange={(e) => setEditingGroupName(e.target.value)}
-                            onKeyDown={async (e) => {
-                              if (e.key === 'Enter') {
-                                await renameGroup(g.id, editingGroupName);
-                                setEditingGroupId(null);
-                              } else if (e.key === 'Escape') {
-                                setEditingGroupId(null);
-                              }
-                            }}
-                            className="premium-input"
-                            style={{ flex: 1 }}
-                          />
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              await renameGroup(g.id, editingGroupName);
-                              setEditingGroupId(null);
-                            }}
-                            className="btn btn-primary"
-                            style={{ padding: '6px 10px', fontSize: '12px' }}
-                          >
-                            저장
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEditingGroupId(null)}
-                            className="btn btn-secondary"
-                            style={{ padding: '6px 10px', fontSize: '12px' }}
-                          >
-                            취소
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <span
-                            className="group-color-dot"
-                            style={{ background: getGroupColor(g.color).solid }}
-                          />
-                          <span style={{ flex: 1, fontSize: '14px' }}>{g.name}</span>
-                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                            {Object.values(cardGroupMap).filter(arr => arr.includes(g.id)).length}개
-                          </span>
-                          <div className="manage-color-swatches">
-                            {GROUP_COLORS.map(c => (
-                              <button
-                                key={c.key}
-                                type="button"
-                                onClick={() => setGroupColor(g.id, c.key)}
-                                className={`color-swatch color-swatch-sm ${g.color === c.key ? 'color-swatch-active' : ''}`}
-                                style={{ background: c.solid }}
-                                title={c.key}
-                              />
-                            ))}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => { setEditingGroupId(g.id); setEditingGroupName(g.name); }}
-                            className="btn btn-secondary"
-                            style={{ padding: '6px 10px', fontSize: '12px' }}
-                          >
-                            <Edit3 size={12} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => deleteGroup(g.id)}
-                            className="btn btn-danger"
-                            style={{ padding: '6px 10px', fontSize: '12px' }}
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="modal-footer" style={{ justifyContent: 'flex-end' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setNewGroupName('');
-                  setNewGroupColor(DEFAULT_GROUP_COLOR.key);
-                  setShowCreateGroup(true);
-                }}
-                className="btn btn-primary"
-              >
-                <Plus size={14} /> 새 그룹
-              </button>
-            </div>
-          </div>
-        </div>
+        <GroupManageModal
+          groups={groups}
+          groupCounts={groupCounts}
+          editingGroupId={editingGroupId}
+          editingGroupName={editingGroupName}
+          onStartRename={(g) => { setEditingGroupId(g.id); setEditingGroupName(g.name); }}
+          onChangeRenameValue={setEditingGroupName}
+          onCommitRename={async (id) => { await renameGroup(id, editingGroupName); setEditingGroupId(null); }}
+          onCancelRename={() => setEditingGroupId(null)}
+          onSetColor={setGroupColor}
+          onDelete={deleteGroup}
+          onCreateNew={() => { setNewGroupName(''); setNewGroupColor(DEFAULT_GROUP_COLOR.key); setShowCreateGroup(true); }}
+          onClose={() => { setShowGroupManage(false); setEditingGroupId(null); }}
+        />
       )}
 
       {/* 그룹 생성 모달 */}
       {showCreateGroup && (
-        <div
-          className="modal-overlay"
-          onClick={(e) => { if (e.target === e.currentTarget) setShowCreateGroup(false); }}
-        >
-          <div className="modal-content" style={{ maxWidth: '380px' }}>
-            <div className="modal-header">
-              <h3>새 그룹</h3>
-              <button onClick={() => setShowCreateGroup(false)} className="modal-close-btn">
-                <X size={16} />
-              </button>
-            </div>
-            <div className="modal-body">
-              <div className="form-group">
-                <label>이름</label>
-                <input
-                  autoFocus
-                  type="text"
-                  value={newGroupName}
-                  onChange={(e) => setNewGroupName(e.target.value)}
-                  onKeyDown={async (e) => {
-                    if (e.key === 'Enter' && newGroupName.trim()) {
-                      await createGroup(newGroupName, newGroupColor);
-                      setShowCreateGroup(false);
-                    }
-                  }}
-                  placeholder="예: 고객사, VIP"
-                  className="premium-input"
-                />
-              </div>
-              <div className="form-group" style={{ marginTop: '12px' }}>
-                <label>색상</label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '4px' }}>
-                  {GROUP_COLORS.map(c => (
-                    <button
-                      key={c.key}
-                      type="button"
-                      onClick={() => setNewGroupColor(c.key)}
-                      className={`color-swatch ${newGroupColor === c.key ? 'color-swatch-active' : ''}`}
-                      style={{ background: c.solid }}
-                      title={c.key}
-                    >
-                      {newGroupColor === c.key && <Check size={12} />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer" style={{ justifyContent: 'flex-end' }}>
-              <button type="button" onClick={() => setShowCreateGroup(false)} className="btn btn-secondary">
-                취소
-              </button>
-              <button
-                type="button"
-                disabled={!newGroupName.trim()}
-                onClick={async () => {
-                  await createGroup(newGroupName, newGroupColor);
-                  setShowCreateGroup(false);
-                }}
-                className="btn btn-primary"
-              >
-                만들기
-              </button>
-            </div>
-          </div>
-        </div>
+        <CreateGroupModal
+          name={newGroupName}
+          color={newGroupColor}
+          onNameChange={setNewGroupName}
+          onColorChange={setNewGroupColor}
+          onCreate={async () => { await createGroup(newGroupName, newGroupColor); setShowCreateGroup(false); }}
+          onClose={() => setShowCreateGroup(false)}
+        />
       )}
 
       {/* 이미지 라이트박스 (배경 클릭하거나 X 누르면 닫힘) */}
