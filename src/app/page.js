@@ -1190,6 +1190,20 @@ export default function Home() {
       } else {
         toast.success('HubSpot 연락처에 정상적으로 등록되었습니다!');
       }
+
+      // 구독 처리는 연락처 저장과 별개로 성공/실패하므로 따로 알린다
+      const subs = result.subscriptions;
+      if (subs) {
+        if (subs.skipped === 'no_email') {
+          toast.info('이메일이 없어 커뮤니케이션 구독 상태는 변경하지 못했습니다.');
+        } else if (subs.error) {
+          toast.error(`구독 상태 변경 실패: ${subs.error}`);
+        } else if (subs.missing?.length) {
+          toast.info(`구독 처리: ${subs.subscribed.join(', ')} (HubSpot에서 못 찾음: ${subs.missing.join(', ')})`);
+        } else if (subs.subscribed?.length) {
+          toast.success(`커뮤니케이션 구독 ${subs.subscribed.length}건을 구독으로 변경했습니다.`);
+        }
+      }
     } catch (err) {
       console.error(err);
       toast.error(`HubSpot 연동 오류: ${err.message}`);
