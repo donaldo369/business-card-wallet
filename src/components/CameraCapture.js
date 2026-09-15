@@ -4,7 +4,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { Image as ImageIcon, FileText, X, Zap, ZapOff } from 'lucide-react';
 import { useToast } from './Toast';
 
-export default function CameraCapture({ onImageSelected, onBatchSelected, onDualSideSelected, onClose, onManualInput }) {
+export default function CameraCapture({ onImageSelected, onFileSelected, onBatchSelected, onDualSideSelected, onClose, onManualInput }) {
   const { toast } = useToast();
   const videoRef = useRef(null);
   const canvasRef = useRef(null); // 실시간 오버레이 캔버스
@@ -455,71 +455,37 @@ export default function CameraCapture({ onImageSelected, onBatchSelected, onDual
     setCapturedImages(prev => prev.filter((_, i) => i !== index));
   };
 
+  // 앨범/파일에서 고른 이미지는 자동 크롭하지 않고 원본 그대로 넘긴다.
+  // detectCardBox 는 뷰파인더 가이드 박스를 사전확률로 쓰는 실시간 전용 감지기라서,
+  // 명함이 프레임을 꽉 채운 사진(메신저로 받은 이미지 등)에서는 본문 텍스트 줄을
+  // 카드 경계로 오인해 전화번호·이메일 열이 통째로 잘려나간다.
+  // 대신 "카드가 프레임을 꽉 채움" 검사와 안전 여백을 갖춘 ImageCropper 에 맡긴다.
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
     if (e.target) e.target.value = ''; // reset so same file can be re-picked
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          const img = document.createElement('img');
-          img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            
-            const box = analyzeFrameImage(img);
-            if (box) {
-              canvas.width = box.w;
-              canvas.height = box.h;
-              ctx.drawImage(img, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h);
-            } else {
-              canvas.width = img.naturalWidth;
-              canvas.height = img.naturalHeight;
-              ctx.drawImage(img, 0, 0);
-            }
+    if (!file) return;
 
-            const croppedDataUrl = canvas.toDataURL('image/jpeg', 0.95);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result;
+      if (!dataUrl) return;
 
-            if (captureMode === 'dual') {
-              if (dualStage === 'front') {
-                setDualFront(croppedDataUrl);
-                setDualStage('back');
-                // 카메라 유지: 사용자가 뒷면을 이어서 촬영/선택
-              } else {
-                stopCamera();
-                onDualSideSelected(dualFront, croppedDataUrl);
-              }
-              return;
-            }
-
-            stopCamera();
-            onImageSelected(croppedDataUrl);
-          };
-          img.src = event.target.result;
+      if (captureMode === 'dual') {
+        if (dualStage === 'front') {
+          setDualFront(dataUrl);
+          setDualStage('back');
+          // 카메라 유지: 사용자가 뒷면을 이어서 촬영/선택
+        } else {
+          stopCamera();
+          onDualSideSelected(dualFront, dataUrl);
         }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
+        return;
+      }
 
-  const analyzeFrameImage = (imgElement) => {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const scale = 0.25;
-    canvas.width = imgElement.naturalWidth * scale;
-    canvas.height = imgElement.naturalHeight * scale;
-    ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
-    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const box = detectCardBox(imgData, canvas.width, canvas.height);
-    if (box) {
-      return {
-        x: box.x / scale,
-        y: box.y / scale,
-        w: box.w / scale,
-        h: box.h / scale
-      };
-    }
-    return null;
+      stopCamera();
+      onFileSelected(dataUrl);
+    };
+    reader.readAsDataURL(file);
   };
 
   return (
