@@ -1450,6 +1450,11 @@ export default function Home() {
                       setShowCapture(false);
                       await extractCardInfo(src);
                     }}
+                    onFileSelected={(src) => {
+                      // 앨범에서 고른 원본 — 크로퍼에서 영역을 확인한 뒤 OCR로 넘어간다
+                      setShowCapture(false);
+                      setSelectedImage(src);
+                    }}
                     onBatchSelected={handleBatchProcess}
                     onClose={() => setShowCapture(false)}
                     onDualSideSelected={handleDualSideSelected}
