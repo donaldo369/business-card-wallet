@@ -1,4 +1,20 @@
 import { NextResponse } from 'next/server';
+import {
+  TARGET_SUBSCRIPTION_NAMES,
+  matchSubscriptions,
+  buildStatusBody,
+} from '../../../lib/hubspotSubscriptions.mjs';
+
+const COMM_PREF_BASE = 'https://api.hubapi.com/communication-preferences/v4';
+
+// 구독 API 실패를 사용자가 조치할 수 있는 문구로 바꾼다.
+// 403 은 대부분 Private App 토큰에 스코프가 없는 경우라 따로 안내한다.
+const describeSubscriptionError = (status, body) => {
+  if (status === 403) {
+    return 'HubSpot 토큰에 커뮤니케이션 구독 권한이 없습니다. 비공개 앱 설정에서 communication_preferences.read_write 스코프를 추가하고 토큰을 다시 발급해 주세요.';
+  }
+  return body?.message || `구독 상태 변경에 실패했습니다 (HTTP ${status}).`;
+};
 
 export async function POST(req) {
   try {
@@ -45,6 +61,65 @@ export async function POST(req) {
       phone: office_phone || '',
       mobilephone: mobile_phone || '',
       address: address || '',
+    };
+
+    // 연락처 저장이 성공한 뒤에만 실행한다. 구독 처리는 부가 작업이므로 실패해도
+    // 연락처 저장을 되돌리지 않고, 요약만 응답에 담아 UI 가 알릴 수 있게 한다.
+    const syncSubscriptions = async () => {
+      if (!email) {
+        return { skipped: 'no_email' };
+      }
+
+      try {
+        const defRes = await fetch(`${COMM_PREF_BASE}/definitions`, {
+          headers: { 'Authorization': `Bearer ${hubspotToken}` },
+        });
+        const defBody = await defRes.json().catch(() => ({}));
+
+        if (!defRes.ok) {
+          console.error(`[HubSpot Sync] definitions failed [${defRes.status}]:`, defBody);
+          return { error: describeSubscriptionError(defRes.status, defBody) };
+        }
+
+        const { matched, missing } = matchSubscriptions(defBody?.results, TARGET_SUBSCRIPTION_NAMES);
+
+        if (matched.length === 0) {
+          return { subscribed: [], missing, error: 'HubSpot 에서 대상 구독 유형을 찾지 못했습니다.' };
+        }
+
+        // 배치(batch/write) 는 Marketing Hub Enterprise 전용이라 단건으로 세 번 호출한다.
+        const settled = await Promise.allSettled(
+          matched.map(async ({ id, name }) => {
+            const res = await fetch(`${COMM_PREF_BASE}/statuses/${encodeURIComponent(email)}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${hubspotToken}`,
+              },
+              body: JSON.stringify(buildStatusBody(id)),
+            });
+            if (!res.ok) {
+              const errBody = await res.json().catch(() => ({}));
+              console.error(`[HubSpot Sync] subscribe "${name}" failed [${res.status}]:`, errBody);
+              throw new Error(describeSubscriptionError(res.status, errBody));
+            }
+            return name;
+          })
+        );
+
+        const subscribed = settled.filter(r => r.status === 'fulfilled').map(r => r.value);
+        const failures = settled.filter(r => r.status === 'rejected').map(r => r.reason?.message);
+
+        return {
+          subscribed,
+          missing,
+          // 여러 건이 같은 이유로 실패하는 경우가 많아 중복은 합친다
+          ...(failures.length ? { error: [...new Set(failures)].join(' ') } : {}),
+        };
+      } catch (err) {
+        console.error('[HubSpot Sync] subscription sync error:', err);
+        return { error: `구독 상태 변경 중 오류가 발생했습니다: ${err.message}` };
+      }
     };
 
     const patchExisting = async (existingId) => {
@@ -98,7 +173,8 @@ export async function POST(req) {
         console.log(`[HubSpot Sync] Contact already exists (id=${existingId}); patching instead of creating.`);
         const patched = await patchExisting(existingId);
         if (patched.ok) {
-          return NextResponse.json({ success: true, id: existingId, merged: true });
+          const subscriptions = await syncSubscriptions();
+          return NextResponse.json({ success: true, id: existingId, merged: true, subscriptions });
         }
         console.error(`HubSpot PATCH after conflict failed [${patched.status}]:`, patched.result);
         return NextResponse.json(
@@ -120,7 +196,8 @@ export async function POST(req) {
       );
     }
 
-    return NextResponse.json({ success: true, id: hubspot_id || result.id });
+    const subscriptions = await syncSubscriptions();
+    return NextResponse.json({ success: true, id: hubspot_id || result.id, subscriptions });
   } catch (error) {
     console.error('HubSpot Sync Error:', error);
     return NextResponse.json(
