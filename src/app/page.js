@@ -25,7 +25,7 @@ import AppShell from '../components/AppShell';
 import GroupSidebar from '../components/GroupSidebar';
 import { DEFAULT_GROUP_COLOR, getGroupColor } from '../lib/groupColors';
 import { classifyPhone } from '../lib/phone';
-import { toDateValue, normalizeEventName, recentEventNames, pendingParts, hasPending } from '../lib/meetingInfo.mjs';
+import { toDateValue, normalizeEventName, recentEventNames, pendingParts, hasPending, summarizeSendResults } from '../lib/meetingInfo.mjs';
 
 // 새 명함 편집 폼을 열 때의 "만난 정보" 기본값 (오늘 날짜, HubSpot 전송 켬)
 const freshMeeting = () => ({ met_on: toDateValue(new Date()), event_name: '', memo: '', send: true });
@@ -118,6 +118,8 @@ export default function Home() {
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [batchResults, setBatchResults] = useState([]);
+  const [batchMeeting, setBatchMeeting] = useState(freshMeeting); // 일괄 스캔 공통 "만난 정보"
+  const [sendProgress, setSendProgress] = useState(null); // 일괄 HubSpot 전송 진행 { current, total }
 
   // 중복 감지 상태
   const [duplicateInfo, setDuplicateInfo] = useState(null);
@@ -850,6 +852,8 @@ export default function Home() {
           ...result.data,
           id: null,
           image_url: images[i],
+          personal_memo: '',
+          send: true,
           _status: 'success'
         };
       } catch (err) {
@@ -882,6 +886,7 @@ export default function Home() {
     );
 
     setBatchResults(results);
+    setBatchMeeting(freshMeeting());
     setBatchProcessing(false);
   };
 
@@ -895,7 +900,22 @@ export default function Home() {
     setEditingCard(card);
   };
 
-  // 배치 결과 전체 자동 저장
+  // 일괄 결과 행 하나의 필드(사람별 메모, HubSpot 전송 여부)를 바꾼다
+  const handleBatchRowChange = (index, patch) => {
+    setBatchResults((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  };
+
+  // 공통 "만난 정보" 변경. 위쪽 전송 스위치를 바꾸면 모든 성공 행의 전송 여부도 같은 값으로 맞춘다.
+  const handleBatchMeetingChange = (patch) => {
+    setBatchMeeting((prev) => ({ ...prev, ...patch }));
+    if ('send' in patch) {
+      setBatchResults((prev) =>
+        prev.map((row) => (row._status === 'success' ? { ...row, send: patch.send } : row))
+      );
+    }
+  };
+
+  // 배치 결과 전체 저장: 모두 저장(+만남 기록)한 뒤, 전송 체크된 행만 한 장씩 순서대로 HubSpot 전송
   const handleSaveBatchAll = async () => {
     const sb = getSupabaseClient();
     if (!sb) {
@@ -909,61 +929,111 @@ export default function Home() {
       return;
     }
 
+    const meeting = batchMeeting;
     setLoading(true);
-    let savedCount = 0;
-    let updatedCount = 0;
-    for (const card of successCards) {
-      try {
-        let finalImageUrl = card.image_url;
-        if (card.image_url.startsWith('data:')) {
-          finalImageUrl = await uploadImageToSupabase(card.image_url);
-        }
+    try {
+      let savedCount = 0;
+      let updatedCount = 0;
+      const meetingErrors = [];
+      const toSend = []; // { name, card, meetings }
 
-        const { data: { session } } = await sb.auth.getSession();
-        const cardData = {
-          name: card.name,
-          first_name: card.first_name,
-          last_name: card.last_name,
-          company: card.company,
-          email: card.email,
-          department: card.department,
-          title: card.title,
-          office_phone: card.office_phone,
-          mobile_phone: card.mobile_phone,
-          address: card.address,
-          image_url: finalImageUrl,
-          back_image_url: null,
-          user_id: session?.user?.id || null,
-        };
+      for (const card of successCards) {
+        try {
+          let finalImageUrl = card.image_url;
+          if (card.image_url.startsWith('data:')) {
+            finalImageUrl = await uploadImageToSupabase(card.image_url);
+          }
 
-        // 중복 검사: 동일 이름+전화번호가 있으면 이전 값을 history에 누적 후 최신 정보로 덮어쓰기
-        const existing = await findDuplicate(card.name, card.mobile_phone);
-        if (existing) {
-          const newHistory = [...(existing.history || []), makeHistoryEntry(existing)];
-          const updatePayload = { ...cardData, history: newHistory, updated_at: new Date().toISOString() };
-          delete updatePayload.user_id;
-          delete updatePayload.back_image_url; // 배치는 단면만이므로 기존 뒷면 이미지 유지
-          const { error } = await sb
-            .from('business_cards')
-            .update(updatePayload)
-            .eq('id', existing.id);
-          if (!error) updatedCount++;
-        } else {
-          const { error } = await sb.from('business_cards').insert([cardData]);
-          if (!error) savedCount++;
+          const { data: { session } } = await sb.auth.getSession();
+          // 배치는 단면만이므로 back_image_url 키를 넣지 않는다 → 병합 시 기존 뒷면 이미지 유지
+          const cardData = {
+            name: card.name,
+            first_name: card.first_name,
+            last_name: card.last_name,
+            company: card.company,
+            email: card.email,
+            department: card.department,
+            title: card.title,
+            office_phone: card.office_phone,
+            mobile_phone: card.mobile_phone,
+            address: card.address,
+            image_url: finalImageUrl,
+            user_id: session?.user?.id || null,
+          };
+
+          const saved = await saveCardRecord(cardData, { allowMerge: true });
+          if (saved.merged) updatedCount++;
+          else savedCount++;
+
+          let meetingRow = null;
+          try {
+            meetingRow = await insertMeeting(saved.id, {
+              met_on: meeting.met_on,
+              event_name: meeting.event_name,
+              shared_memo: meeting.memo,
+              personal_memo: card.personal_memo,
+            });
+          } catch (err) {
+            console.error('만난 정보 저장 실패:', err);
+            meetingErrors.push(err.message);
+          }
+
+          if (hubspotConfigured && card.send) {
+            toSend.push({
+              name: card.name || '이름 없음',
+              card: { ...cardData, id: saved.id, hubspot_id: saved.hubspot_id },
+              meetings: meetingRow ? [meetingRow] : [],
+            });
+          }
+        } catch (err) {
+          console.error('배치 저장 실패:', err);
         }
-      } catch (err) {
-        console.error('배치 저장 실패:', err);
       }
-    }
 
-    const parts = [];
-    if (savedCount > 0) parts.push(`${savedCount}장 새로 추가`);
-    if (updatedCount > 0) parts.push(`${updatedCount}장 업데이트`);
-    toast.success(`처리 완료: ${parts.join(', ')}`);
-    setBatchResults([]);
-    loadCards();
-    setLoading(false);
+      const parts = [];
+      if (savedCount > 0) parts.push(`${savedCount}장 새로 추가`);
+      if (updatedCount > 0) parts.push(`${updatedCount}장 업데이트`);
+      toast.success(`처리 완료: ${parts.join(', ')}`);
+      if (meetingErrors.length > 0) {
+        toast.error(`만난 정보 저장 실패 ${meetingErrors.length}건: ${[...new Set(meetingErrors)].join(', ')}`);
+      }
+
+      // HubSpot 전송: 병렬 금지, 한 장씩 순서대로
+      if (toSend.length > 0) {
+        const sendResults = [];
+        for (let i = 0; i < toSend.length; i++) {
+          setSendProgress({ current: i + 1, total: toSend.length });
+          const { name, card, meetings } = toSend[i];
+          const r = await sendCardToHubSpot(card, meetings);
+          sendResults.push({ name, ok: r.ok, error: r.error, meetingResults: r.meetingResults });
+        }
+        setSendProgress(null);
+
+        const summary = summarizeSendResults(sendResults);
+        if (summary.success.length > 0) {
+          toast.success(`HubSpot 전송: 성공 ${summary.success.length}건`);
+        }
+        const problems = [
+          ...summary.partial.map(p => `${p.name}(일부 실패: ${[...new Set(p.errors)].join(', ')})`),
+          ...summary.failed.map(f => `${f.name}(${f.error})`),
+        ];
+        if (problems.length > 0) {
+          const head = [
+            summary.partial.length > 0 ? `부분 성공 ${summary.partial.length}건` : null,
+            summary.failed.length > 0 ? `실패 ${summary.failed.length}건` : null,
+          ].filter(Boolean).join(', ');
+          toast.error(`HubSpot 전송 ${head} - ${[...new Set(problems)].join(' / ')}`);
+        }
+      }
+
+      setBatchResults([]);
+      setBatchMeeting(freshMeeting());
+      loadCards();
+      loadRecentEvents();
+    } finally {
+      setSendProgress(null);
+      setLoading(false);
+    }
   };
 
   const handleDualSideSelected = (frontImg, backImg) => {
@@ -1818,6 +1888,12 @@ export default function Home() {
                   onSelect={handleSelectBatchResult}
                   onSaveAll={handleSaveBatchAll}
                   onClose={() => setBatchResults([])}
+                  meeting={batchMeeting}
+                  onMeetingChange={handleBatchMeetingChange}
+                  recentEvents={recentEvents}
+                  showSendSwitch={hubspotConfigured}
+                  onRowChange={handleBatchRowChange}
+                  sendProgress={sendProgress}
                 />
               )}
 

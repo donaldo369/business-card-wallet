@@ -11,6 +11,7 @@ import {
   pendingParts,
   hasPending,
   toDateValue,
+  summarizeSendResults,
 } from './meetingInfo.mjs';
 
 test('toDateValue 는 로컬 날짜를 YYYY-MM-DD 로 만든다', () => {
@@ -83,4 +84,14 @@ test('pendingParts 는 행사 없으면 event 를, 내용 없으면 note 를 요
 test('hasPending 은 하나라도 true 면 true', () => {
   assert.equal(hasPending({ event: false, date: false, note: false }), false);
   assert.equal(hasPending({ event: false, date: true, note: false }), true);
+});
+test('summarizeSendResults 는 성공/부분 성공/실패를 나눈다', () => {
+  const s = summarizeSendResults([
+    { name: '김민수', ok: true, meetingResults: [{ event: 'done', date: 'done', note: 'done', errors: [] }] },
+    { name: '이정호', ok: true, meetingResults: [{ event: 'failed', date: 'done', note: 'done', errors: ['권한 없음'] }] },
+    { name: '최유진', ok: false, error: 'HTTP 400', meetingResults: [] },
+  ]);
+  assert.deepEqual(s.success, ['김민수']);
+  assert.deepEqual(s.partial, [{ name: '이정호', errors: ['권한 없음'] }]);
+  assert.deepEqual(s.failed, [{ name: '최유진', error: 'HTTP 400' }]);
 });

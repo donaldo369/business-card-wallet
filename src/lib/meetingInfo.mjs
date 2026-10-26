@@ -102,3 +102,27 @@ export function pendingParts(meeting) {
 export function hasPending(parts) {
   return parts.event || parts.date || parts.note;
 }
+
+/**
+ * 일괄 HubSpot 전송 결과 요약.
+ * 연락처 전송 실패면 failed, 연락처는 성공했지만 만남 항목 중 'failed' 파트가 있으면 partial, 나머지는 success.
+ */
+export function summarizeSendResults(results) {
+  const success = [];
+  const partial = [];
+  const failed = [];
+  for (const r of results) {
+    if (!r.ok) {
+      failed.push({ name: r.name, error: r.error || '알 수 없는 오류' });
+      continue;
+    }
+    const broken = (r.meetingResults || []).filter(m => m.event === 'failed' || m.date === 'failed' || m.note === 'failed');
+    if (broken.length === 0) {
+      success.push(r.name);
+      continue;
+    }
+    const errors = [...new Set(broken.flatMap(m => m.errors || []))];
+    partial.push({ name: r.name, errors: errors.length ? errors : ['만난 정보 일부 반영 실패'] });
+  }
+  return { success, partial, failed };
+}
