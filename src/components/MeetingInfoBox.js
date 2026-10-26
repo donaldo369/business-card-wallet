@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useId, useRef } from 'react';
-import { quickDateOptions } from '../lib/meetingInfo.mjs';
+import { quickDateOptions, toDateValue } from '../lib/meetingInfo.mjs';
 
 /**
  * "만난 정보" 입력 박스 (날짜 · 행사명 · 메모 · HubSpot 전송 스위치).
@@ -72,6 +72,7 @@ export default function MeetingInfoBox({ value, onChange, recentEvents = [], sho
             aria-label="만난 날짜 직접 선택"
             tabIndex={-1}
             value={value.met_on || ''}
+            max={toDateValue(new Date())}
             onChange={e => e.target.value && onChange({ met_on: e.target.value })}
           />
         </div>

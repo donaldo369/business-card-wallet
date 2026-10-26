@@ -966,6 +966,7 @@ export default function Home() {
       let savedCount = 0;
       let updatedCount = 0;
       const meetingErrors = [];
+      const failedRows = []; // 저장 실패한 행: 목록에 남겨 메모·전송 체크째로 다시 시도할 수 있게 한다
       const toSend = []; // { name, card, meetings }
 
       for (const card of successCards) {
@@ -1018,13 +1019,20 @@ export default function Home() {
           }
         } catch (err) {
           console.error('배치 저장 실패:', err);
+          failedRows.push({ row: card, name: card.name || '이름 없음', error: err?.message || '알 수 없는 오류' });
         }
       }
 
       const parts = [];
       if (savedCount > 0) parts.push(`${savedCount}장 새로 추가`);
       if (updatedCount > 0) parts.push(`${updatedCount}장 업데이트`);
-      toast.success(`처리 완료: ${parts.join(', ')}`);
+      if (parts.length > 0) toast.success(`처리 완료: ${parts.join(', ')}`);
+      if (failedRows.length > 0) {
+        const reasons = [...new Set(failedRows.map(f => f.error))].join(', ');
+        toast.error(
+          `명함 저장 실패 ${failedRows.length}건: ${failedRows.map(f => f.name).join(', ')} (${reasons}) - 목록에 남겨 두었으니 다시 저장해 주세요.`
+        );
+      }
       if (meetingErrors.length > 0) {
         toast.error(`만난 정보 저장 실패 ${meetingErrors.length}건: ${[...new Set(meetingErrors)].join(', ')}`);
       }
@@ -1057,8 +1065,9 @@ export default function Home() {
         }
       }
 
-      setBatchResults([]);
-      setBatchMeeting(freshMeeting());
+      // 실패한 행은 그대로 남기고(편집·메모·전송 체크 유지), 다 저장됐을 때만 만난 정보를 초기화한다
+      setBatchResults(failedRows.map(f => f.row));
+      if (failedRows.length === 0) setBatchMeeting(freshMeeting());
       loadCards();
       loadRecentEvents();
     } finally {

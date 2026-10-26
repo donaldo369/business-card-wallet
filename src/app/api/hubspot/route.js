@@ -31,21 +31,32 @@ export async function GET(req) {
 }
 
 // 만남 반영은 부가 작업이다. 예외가 나도 연락처 저장 성공 응답은 유지한다.
+const MET_ON_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+const failedMeetingResult = (m, message) => ({
+  id: m?.id,
+  event: 'failed',
+  date: 'failed',
+  note: 'failed',
+  note_id: null,
+  errors: [message],
+});
+
 const runMeetingSync = async (token, contactId, meetings) => {
   if (!Array.isArray(meetings) || meetings.length === 0) return [];
+  // 만난 날짜 형식이 틀린 만남은 HubSpot 에 보내지 않고 실패로 알려준다 (조용히 버리지 않음).
+  const valid = meetings.filter((m) => MET_ON_PATTERN.test(String(m?.met_on ?? '')));
+  const invalidResults = meetings
+    .filter((m) => !valid.includes(m))
+    .map((m) => failedMeetingResult(m, '만난 날짜 형식이 올바르지 않습니다.'));
+  if (valid.length === 0) return invalidResults;
   try {
-    return await syncMeetingParts({ fetchFn: fetch, token }, contactId, meetings);
+    const synced = await syncMeetingParts({ fetchFn: fetch, token }, contactId, valid);
+    return [...synced, ...invalidResults];
   } catch (err) {
     console.error('[HubSpot Sync] meeting sync error:', err);
     const message = `만남 정보 반영 중 오류가 발생했습니다: ${err.message}`;
-    return meetings.map((m) => ({
-      id: m?.id,
-      event: 'failed',
-      date: 'failed',
-      note: 'failed',
-      note_id: null,
-      errors: [message],
-    }));
+    return [...valid.map((m) => failedMeetingResult(m, message)), ...invalidResults];
   }
 };
 

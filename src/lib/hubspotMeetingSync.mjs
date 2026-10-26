@@ -41,11 +41,11 @@ export async function hubspotFetch(fetchFn, token, url, init = {}) {
   }
 }
 
-// 스코프 이름은 HubSpot 개발자 문서(scopes 목록)의 crm.schemas.contacts.write /
-// crm.objects.contacts.write 설명 기준. 노트 생성 스코프는 문서에 명시가 없어 연락처 쓰기 권한으로 안내한다.
+// 스코프 이름은 HubSpot 개발자 문서(scopes 목록)의 crm.schemas.contacts.read / crm.schemas.contacts.write /
+// crm.objects.contacts.write 설명 기준. 속성 확인은 GET(읽기), 옵션 추가는 PATCH(쓰기)라 두 스코프가 모두 필요하다. 노트 생성 스코프는 문서에 명시가 없어 연락처 쓰기 권한으로 안내한다.
 export function describeScopeError(kind) {
   if (kind === 'schema') {
-    return 'HubSpot 토큰에 연락처 속성 설정 권한이 없습니다. 비공개 앱 설정에서 crm.schemas.contacts.write 스코프를 추가하고 토큰을 다시 발급해 주세요.';
+    return 'HubSpot 토큰에 연락처 속성 설정 권한이 없습니다. 비공개 앱 설정에서 crm.schemas.contacts.read, crm.schemas.contacts.write 스코프를 추가하고 토큰을 다시 발급해 주세요.';
   }
   return 'HubSpot 토큰에 노트 작성 권한이 없습니다. 비공개 앱 설정에서 crm.objects.contacts.write 스코프를 추가하고 토큰을 다시 발급해 주세요.';
 }

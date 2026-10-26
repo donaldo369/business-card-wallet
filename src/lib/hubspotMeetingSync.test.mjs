@@ -231,6 +231,7 @@ test('429 가 계속되면 최대 2회 재시도 후 429 를 돌려준다 (Retry
 });
 
 test('describeScopeError 는 필요한 스코프 이름을 안내한다', () => {
+  assert.match(describeScopeError('schema'), /crm\.schemas\.contacts\.read/);
   assert.match(describeScopeError('schema'), /crm\.schemas\.contacts\.write/);
   assert.match(describeScopeError('note'), /crm\.objects\.contacts\.write/);
 });

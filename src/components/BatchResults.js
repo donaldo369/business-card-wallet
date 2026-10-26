@@ -82,9 +82,9 @@ export default function BatchResults({
                     role={ok ? 'button' : undefined}
                     tabIndex={ok ? 0 : undefined}
                     title={ok ? '눌러서 편집' : undefined}
-                    onClick={() => ok && onSelect(idx)}
+                    onClick={() => ok && !busy && onSelect(idx)}
                     onKeyDown={(e) => {
-                      if (ok && (e.key === 'Enter' || e.key === ' ')) {
+                      if (ok && !busy && (e.key === 'Enter' || e.key === ' ')) {
                         e.preventDefault();
                         onSelect(idx);
                       }
