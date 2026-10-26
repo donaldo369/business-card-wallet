@@ -4,6 +4,7 @@ import React from 'react';
 import { Building2, History, Mail, MapPin, Phone, Check } from 'lucide-react';
 import { classifyPhone } from '../lib/phone';
 import { getGroupColor } from '../lib/groupColors';
+import MeetingHistory from './MeetingHistory';
 
 function PhoneTypeBadge({ phone }) {
   const type = classifyPhone(phone);
@@ -45,7 +46,7 @@ function PhoneTypeBadge({ phone }) {
  * 명함 상세 본문. 컨테이너(우측 패널 / 모달 / 바텀시트)를 가리지 않는다.
  * 수정·삭제·HubSpot 액션 버튼은 컨테이너 쪽 책임이라 여기 없다.
  */
-export default function CardDetail({ card, groups, activeGroupIds, onToggleGroup, onOpenImage }) {
+export default function CardDetail({ card, groups, activeGroupIds, onToggleGroup, onOpenImage, meetings = [], hubspotConfigured = false }) {
   return (
     <>
       {/* 이미지 풀 뷰 */}
@@ -140,6 +141,9 @@ export default function CardDetail({ card, groups, activeGroupIds, onToggleGroup
           </div>
         </div>
       )}
+
+      {/* 만남 기록 */}
+      <MeetingHistory meetings={meetings} showHubSpotStatus={hubspotConfigured && Boolean(card.hubspot_id)} />
 
       {/* 명함 히스토리 (과거에 스캔된 같은 인물의 명함 이미지) */}
       {card.history && card.history.length > 0 && (

@@ -55,6 +55,23 @@ const fetchRecentEventNames = async () => {
   return recentEventNames(data || []);
 };
 
+// 한 명함의 만남 기록 (최신순). 실패 시 null
+const fetchCardMeetings = async (cardId) => {
+  const sb = getSupabaseClient();
+  if (!sb || !cardId) return null;
+  const { data, error } = await sb
+    .from('card_meetings')
+    .select('*')
+    .eq('card_id', cardId)
+    .order('met_on', { ascending: false })
+    .order('created_at', { ascending: false });
+  if (error) {
+    console.warn('만남 기록 로드 실패 (테이블 미생성 가능):', error.message);
+    return null;
+  }
+  return data || [];
+};
+
 const CameraCapture = dynamic(() => import('../components/CameraCapture'), { ssr: false });
 const ImageCropper = dynamic(() => import('../components/ImageCropper'), { ssr: false });
 const ZoomableImage = dynamic(() => import('../components/ZoomableImage'), { ssr: false });
@@ -112,6 +129,7 @@ export default function Home() {
   const [hubspotConfigured, setHubspotConfigured] = useState(false); // 서버 env 또는 설정의 HubSpot 토큰 존재 여부
   const [recentEvents, setRecentEvents] = useState([]); // 최근 행사명 (추천 칩)
   const [viewingCard, setViewingCard] = useState(null);
+  const [meetingsState, setMeetingsState] = useState({ cardId: null, rows: [] }); // 상세 카드의 만남 기록
   const [lightboxImage, setLightboxImage] = useState(null);
 
   // 배치 스캔 상태
@@ -610,6 +628,19 @@ export default function Home() {
       if (names) setRecentEvents(names);
     });
   }, [supabaseReady, userId, refreshHubspotConfigured]);
+
+  // 보고 있는 명함이 바뀌면 만남 기록을 읽는다 (빠르게 바뀌면 이전 응답은 버린다)
+  const viewingCardId = viewingCard?.id ?? null;
+  useEffect(() => {
+    if (!viewingCardId) return;
+    let cancelled = false;
+    fetchCardMeetings(viewingCardId).then((rows) => {
+      if (!cancelled && rows) setMeetingsState({ cardId: viewingCardId, rows });
+    });
+    return () => { cancelled = true; };
+  }, [viewingCardId]);
+  // 다른 명함/닫힘 상태의 기록은 빈 목록으로 취급
+  const viewingMeetings = viewingCardId && meetingsState.cardId === viewingCardId ? meetingsState.rows : [];
 
   useEffect(() => {
     if (!viewingCard) return;
@@ -1467,6 +1498,9 @@ export default function Home() {
           setViewingCard(prev => ({ ...prev, hubspot_id: result.id }));
         }
         loadCards();
+        fetchCardMeetings(card.id).then((rows) => {
+          if (rows) setMeetingsState({ cardId: card.id, rows });
+        });
       }
 
       if (result.merged) {
@@ -2234,6 +2268,8 @@ export default function Home() {
               activeGroupIds={cardGroupMap[viewingCard.id] || []}
               onToggleGroup={toggleCardGroup}
               onOpenImage={setLightboxImage}
+              meetings={viewingMeetings}
+              hubspotConfigured={hubspotConfigured}
       />
             <div className="detail-pane-actions">{detailActions}</div>
           </>
@@ -2265,6 +2301,8 @@ export default function Home() {
             activeGroupIds={cardGroupMap[viewingCard.id] || []}
             onToggleGroup={toggleCardGroup}
             onOpenImage={setLightboxImage}
+              meetings={viewingMeetings}
+              hubspotConfigured={hubspotConfigured}
           />
         </Sheet>
       )}
