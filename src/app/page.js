@@ -25,6 +25,52 @@ import AppShell from '../components/AppShell';
 import GroupSidebar from '../components/GroupSidebar';
 import { DEFAULT_GROUP_COLOR, getGroupColor } from '../lib/groupColors';
 import { classifyPhone } from '../lib/phone';
+import { toDateValue, normalizeEventName, recentEventNames, pendingParts, hasPending, summarizeSendResults } from '../lib/meetingInfo.mjs';
+
+// 새 명함 편집 폼을 열 때의 "만난 정보" 기본값 (오늘 날짜, HubSpot 전송 켬)
+const freshMeeting = () => ({ met_on: toDateValue(new Date()), event_name: '', memo: '', send: true });
+
+// 빈 문자열/공백뿐인 메모는 null 로 저장
+const blankToNull = (v) => {
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s === '' ? null : s;
+};
+
+// 최근 행사명: card_meetings 에서 최근 200행을 읽어 중복 제거 (RLS 로 본인 것만 조회됨). 실패 시 null
+const fetchRecentEventNames = async () => {
+  const sb = getSupabaseClient();
+  if (!sb) return null;
+  const { data, error } = await sb
+    .from('card_meetings')
+    .select('event_name, created_at')
+    .not('event_name', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (error) {
+    // card_meetings 테이블이 아직 없을 수 있음 (마이그레이션 전). 조용히 무시.
+    console.warn('최근 행사명 로드 실패 (테이블 미생성 가능):', error.message);
+    return null;
+  }
+  return recentEventNames(data || []);
+};
+
+// 한 명함의 만남 기록 (최신순). 실패 시 null
+const fetchCardMeetings = async (cardId) => {
+  const sb = getSupabaseClient();
+  if (!sb || !cardId) return null;
+  const { data, error } = await sb
+    .from('card_meetings')
+    .select('*')
+    .eq('card_id', cardId)
+    .order('met_on', { ascending: false })
+    .order('created_at', { ascending: false });
+  if (error) {
+    console.warn('만남 기록 로드 실패 (테이블 미생성 가능):', error.message);
+    return null;
+  }
+  return data || [];
+};
 
 const CameraCapture = dynamic(() => import('../components/CameraCapture'), { ssr: false });
 const ImageCropper = dynamic(() => import('../components/ImageCropper'), { ssr: false });
@@ -79,13 +125,19 @@ export default function Home() {
   
   const [isExtracting, setIsExtracting] = useState(false);
   const [editingCard, setEditingCard] = useState(null);
+  const [editingMeeting, setEditingMeeting] = useState(null); // 새 한 장 저장 시 "만난 정보" { met_on, event_name, memo, send }
+  const [hubspotConfigured, setHubspotConfigured] = useState(false); // 서버 env 또는 설정의 HubSpot 토큰 존재 여부
+  const [recentEvents, setRecentEvents] = useState([]); // 최근 행사명 (추천 칩)
   const [viewingCard, setViewingCard] = useState(null);
+  const [meetingsState, setMeetingsState] = useState({ cardId: null, rows: [] }); // 상세 카드의 만남 기록
   const [lightboxImage, setLightboxImage] = useState(null);
 
   // 배치 스캔 상태
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [batchResults, setBatchResults] = useState([]);
+  const [batchMeeting, setBatchMeeting] = useState(freshMeeting); // 일괄 스캔 공통 "만난 정보"
+  const [sendProgress, setSendProgress] = useState(null); // 일괄 HubSpot 전송 진행 { current, total }
 
   // 중복 감지 상태
   const [duplicateInfo, setDuplicateInfo] = useState(null);
@@ -123,6 +175,8 @@ export default function Home() {
   const fileInputRef = useRef(null);
   const editFormRef = useRef(null);
   const hasScrolledToFormRef = useRef(false);
+  // 저장된(입력 중이 아닌) HubSpot 토큰. 설정 모달 입력마다 조회하지 않도록 ref 로 둔다.
+  const savedHubspotTokenRef = useRef('');
 
   const handleAddNewCard = () => {
     const isMobile = typeof navigator !== 'undefined' && /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -179,6 +233,7 @@ export default function Home() {
         console.warn('LocalStorage가 비활성화되어 있거나 접근할 수 없습니다 (Safari 개인정보 보호 브라우징 등):', err);
       }
       setSettings(savedConfig);
+      savedHubspotTokenRef.current = savedConfig.hubspotToken;
 
       const client = getSupabaseClient(
         savedConfig.supabaseUrl && savedConfig.supabaseAnonKey 
@@ -238,6 +293,8 @@ export default function Home() {
       console.error(err);
       toast.error('쿠키 및 로컬 저장소가 차단되어 설정을 저장할 수 없습니다.');
     }
+    savedHubspotTokenRef.current = settings.hubspotToken;
+    refreshHubspotConfigured(settings.hubspotToken);
     
     const client = getSupabaseClient({ url: settings.supabaseUrl, anonKey: settings.supabaseAnonKey });
     setSupabaseReady(!!client);
@@ -280,6 +337,7 @@ export default function Home() {
       await sb.auth.signOut();
       setUser(null);
       setCards([]);
+      setRecentEvents([]);
     } catch (err) {
       console.error(err);
     }
@@ -325,6 +383,26 @@ export default function Home() {
     } finally {
       setLoading(false);
       setInitialLoading(false);
+    }
+  }, []);
+
+  // 최근 행사명을 다시 읽어 추천 칩에 반영
+  const loadRecentEvents = useCallback(async () => {
+    const names = await fetchRecentEventNames();
+    if (names) setRecentEvents(names);
+  }, []);
+
+  // HubSpot 토큰 설정 여부 조회 (서버 env 우선, 없으면 설정의 토큰 헤더). 토큰 값 자체는 응답에 없다.
+  const refreshHubspotConfigured = useCallback(async (token) => {
+    try {
+      const headers = {};
+      if (token) headers['x-hubspot-token'] = token;
+      const res = await fetch('/api/hubspot', { headers });
+      const result = await res.json();
+      setHubspotConfigured(!!result.configured);
+    } catch (err) {
+      console.warn('HubSpot 설정 확인 실패:', err.message);
+      setHubspotConfigured(false);
     }
   }, []);
 
@@ -542,6 +620,28 @@ export default function Home() {
     }
   }, [supabaseReady, userId, loadCards, loadGroups]);
 
+  // 로그인 후: HubSpot 설정 여부와 최근 행사명을 불러온다
+  useEffect(() => {
+    if (!supabaseReady || !userId) return;
+    refreshHubspotConfigured(savedHubspotTokenRef.current);
+    fetchRecentEventNames().then((names) => {
+      if (names) setRecentEvents(names);
+    });
+  }, [supabaseReady, userId, refreshHubspotConfigured]);
+
+  // 보고 있는 명함이 바뀌면 만남 기록을 읽는다 (빠르게 바뀌면 이전 응답은 버린다)
+  const viewingCardId = viewingCard?.id ?? null;
+  useEffect(() => {
+    if (!viewingCardId) return;
+    let cancelled = false;
+    fetchCardMeetings(viewingCardId).then((rows) => {
+      if (!cancelled && rows) setMeetingsState({ cardId: viewingCardId, rows });
+    });
+    return () => { cancelled = true; };
+  }, [viewingCardId]);
+  // 다른 명함/닫힘 상태의 기록은 빈 목록으로 취급
+  const viewingMeetings = viewingCardId && meetingsState.cardId === viewingCardId ? meetingsState.rows : [];
+
   useEffect(() => {
     if (!viewingCard) return;
     const handleKeyDown = (e) => {
@@ -692,6 +792,7 @@ export default function Home() {
         image_url: base64Image,
         back_image_url: backBase64,
       });
+      setEditingMeeting(freshMeeting());
     } catch (err) {
       console.error(err);
       toast.error(err.message);
@@ -730,6 +831,7 @@ export default function Home() {
         image_url: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="%231e293b"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%2364748b" font-family="sans-serif" font-size="12">텍스트 입력</text></svg>',
         back_image_url: null,
       });
+      setEditingMeeting(freshMeeting());
     } catch (err) {
       console.error(err);
       toast.error(err.message);
@@ -781,6 +883,8 @@ export default function Home() {
           ...result.data,
           id: null,
           image_url: images[i],
+          personal_memo: '',
+          send: true,
           _status: 'success'
         };
       } catch (err) {
@@ -813,6 +917,7 @@ export default function Home() {
     );
 
     setBatchResults(results);
+    setBatchMeeting(freshMeeting());
     setBatchProcessing(false);
   };
 
@@ -821,12 +926,27 @@ export default function Home() {
     const card = { ...batchResults[index] };
     delete card._status;
     delete card._error;
-    // 저장 성공 시 일괄 결과 목록에서 어떤 항목을 제거할지 표시
+    // 편집을 마치면 저장하지 않고 일괄 결과 목록의 이 행에 반영한다
     card._batchIndex = index;
     setEditingCard(card);
   };
 
-  // 배치 결과 전체 자동 저장
+  // 일괄 결과 행 하나의 필드(사람별 메모, HubSpot 전송 여부)를 바꾼다
+  const handleBatchRowChange = (index, patch) => {
+    setBatchResults((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  };
+
+  // 공통 "만난 정보" 변경. 위쪽 전송 스위치를 바꾸면 모든 성공 행의 전송 여부도 같은 값으로 맞춘다.
+  const handleBatchMeetingChange = (patch) => {
+    setBatchMeeting((prev) => ({ ...prev, ...patch }));
+    if ('send' in patch) {
+      setBatchResults((prev) =>
+        prev.map((row) => (row._status === 'success' ? { ...row, send: patch.send } : row))
+      );
+    }
+  };
+
+  // 배치 결과 전체 저장: 모두 저장(+만남 기록)한 뒤, 전송 체크된 행만 한 장씩 순서대로 HubSpot 전송
   const handleSaveBatchAll = async () => {
     const sb = getSupabaseClient();
     if (!sb) {
@@ -840,61 +960,120 @@ export default function Home() {
       return;
     }
 
+    const meeting = batchMeeting;
     setLoading(true);
-    let savedCount = 0;
-    let updatedCount = 0;
-    for (const card of successCards) {
-      try {
-        let finalImageUrl = card.image_url;
-        if (card.image_url.startsWith('data:')) {
-          finalImageUrl = await uploadImageToSupabase(card.image_url);
-        }
+    try {
+      let savedCount = 0;
+      let updatedCount = 0;
+      const meetingErrors = [];
+      const failedRows = []; // 저장 실패한 행: 목록에 남겨 메모·전송 체크째로 다시 시도할 수 있게 한다
+      const toSend = []; // { name, card, meetings }
 
-        const { data: { session } } = await sb.auth.getSession();
-        const cardData = {
-          name: card.name,
-          first_name: card.first_name,
-          last_name: card.last_name,
-          company: card.company,
-          email: card.email,
-          department: card.department,
-          title: card.title,
-          office_phone: card.office_phone,
-          mobile_phone: card.mobile_phone,
-          address: card.address,
-          image_url: finalImageUrl,
-          back_image_url: null,
-          user_id: session?.user?.id || null,
-        };
+      for (const card of successCards) {
+        try {
+          let finalImageUrl = card.image_url;
+          if (card.image_url.startsWith('data:')) {
+            finalImageUrl = await uploadImageToSupabase(card.image_url);
+          }
 
-        // 중복 검사: 동일 이름+전화번호가 있으면 이전 값을 history에 누적 후 최신 정보로 덮어쓰기
-        const existing = await findDuplicate(card.name, card.mobile_phone);
-        if (existing) {
-          const newHistory = [...(existing.history || []), makeHistoryEntry(existing)];
-          const updatePayload = { ...cardData, history: newHistory, updated_at: new Date().toISOString() };
-          delete updatePayload.user_id;
-          delete updatePayload.back_image_url; // 배치는 단면만이므로 기존 뒷면 이미지 유지
-          const { error } = await sb
-            .from('business_cards')
-            .update(updatePayload)
-            .eq('id', existing.id);
-          if (!error) updatedCount++;
-        } else {
-          const { error } = await sb.from('business_cards').insert([cardData]);
-          if (!error) savedCount++;
+          const { data: { session } } = await sb.auth.getSession();
+          // 배치는 단면만이므로 back_image_url 키를 넣지 않는다 → 병합 시 기존 뒷면 이미지 유지
+          const cardData = {
+            name: card.name,
+            first_name: card.first_name,
+            last_name: card.last_name,
+            company: card.company,
+            email: card.email,
+            department: card.department,
+            title: card.title,
+            office_phone: card.office_phone,
+            mobile_phone: card.mobile_phone,
+            address: card.address,
+            image_url: finalImageUrl,
+            user_id: session?.user?.id || null,
+          };
+
+          const saved = await saveCardRecord(cardData, { allowMerge: true });
+          if (saved.merged) updatedCount++;
+          else savedCount++;
+
+          let meetingRow = null;
+          try {
+            meetingRow = await insertMeeting(saved.id, {
+              met_on: meeting.met_on,
+              event_name: meeting.event_name,
+              shared_memo: meeting.memo,
+              personal_memo: card.personal_memo,
+            });
+          } catch (err) {
+            console.error('만난 정보 저장 실패:', err);
+            meetingErrors.push(err.message);
+          }
+
+          if (hubspotConfigured && card.send) {
+            toSend.push({
+              name: card.name || '이름 없음',
+              card: { ...cardData, id: saved.id, hubspot_id: saved.hubspot_id },
+              meetings: meetingRow ? [meetingRow] : [],
+            });
+          }
+        } catch (err) {
+          console.error('배치 저장 실패:', err);
+          failedRows.push({ row: card, name: card.name || '이름 없음', error: err?.message || '알 수 없는 오류' });
         }
-      } catch (err) {
-        console.error('배치 저장 실패:', err);
       }
-    }
 
-    const parts = [];
-    if (savedCount > 0) parts.push(`${savedCount}장 새로 추가`);
-    if (updatedCount > 0) parts.push(`${updatedCount}장 업데이트`);
-    toast.success(`처리 완료: ${parts.join(', ')}`);
-    setBatchResults([]);
-    loadCards();
-    setLoading(false);
+      const parts = [];
+      if (savedCount > 0) parts.push(`${savedCount}장 새로 추가`);
+      if (updatedCount > 0) parts.push(`${updatedCount}장 업데이트`);
+      if (parts.length > 0) toast.success(`처리 완료: ${parts.join(', ')}`);
+      if (failedRows.length > 0) {
+        const reasons = [...new Set(failedRows.map(f => f.error))].join(', ');
+        toast.error(
+          `명함 저장 실패 ${failedRows.length}건: ${failedRows.map(f => f.name).join(', ')} (${reasons}) - 목록에 남겨 두었으니 다시 저장해 주세요.`
+        );
+      }
+      if (meetingErrors.length > 0) {
+        toast.error(`만난 정보 저장 실패 ${meetingErrors.length}건: ${[...new Set(meetingErrors)].join(', ')}`);
+      }
+
+      // HubSpot 전송: 병렬 금지, 한 장씩 순서대로
+      if (toSend.length > 0) {
+        const sendResults = [];
+        for (let i = 0; i < toSend.length; i++) {
+          setSendProgress({ current: i + 1, total: toSend.length });
+          const { name, card, meetings } = toSend[i];
+          const r = await sendCardToHubSpot(card, meetings);
+          sendResults.push({ name, ok: r.ok, error: r.error, meetingResults: r.meetingResults });
+        }
+        setSendProgress(null);
+
+        const summary = summarizeSendResults(sendResults);
+        if (summary.success.length > 0) {
+          toast.success(`HubSpot 전송: 성공 ${summary.success.length}건`);
+        }
+        const problems = [
+          ...summary.partial.map(p => `${p.name}(일부 실패: ${[...new Set(p.errors)].join(', ')})`),
+          ...summary.failed.map(f => `${f.name}(${f.error})`),
+        ];
+        if (problems.length > 0) {
+          const head = [
+            summary.partial.length > 0 ? `부분 성공 ${summary.partial.length}건` : null,
+            summary.failed.length > 0 ? `실패 ${summary.failed.length}건` : null,
+          ].filter(Boolean).join(', ');
+          toast.error(`HubSpot 전송 ${head} - ${[...new Set(problems)].join(' / ')}`);
+        }
+      }
+
+      // 실패한 행은 그대로 남기고(편집·메모·전송 체크 유지), 다 저장됐을 때만 만난 정보를 초기화한다
+      setBatchResults(failedRows.map(f => f.row));
+      if (failedRows.length === 0) setBatchMeeting(freshMeeting());
+      loadCards();
+      loadRecentEvents();
+    } finally {
+      setSendProgress(null);
+      setLoading(false);
+    }
   };
 
   const handleDualSideSelected = (frontImg, backImg) => {
@@ -1030,8 +1209,82 @@ export default function Home() {
     }
   };
 
+  // 명함 한 장 저장 (새 스캔/일괄 공용).
+  // allowMerge 면 동일인(이름 + 핸드폰)을 찾아 이전 값을 history 에 누적한 뒤 최신 정보로 덮어쓴다.
+  // cardData 에 back_image_url 키가 없으면 병합 시 기존 뒷면 이미지를 유지한다 (일괄 스캔은 단면).
+  const saveCardRecord = async (cardData, { allowMerge = true } = {}) => {
+    const sb = getSupabaseClient();
+    if (!sb) throw new Error('Supabase 연결 설정이 필요합니다.');
+
+    if (allowMerge) {
+      const existing = await findDuplicate(cardData.name, cardData.mobile_phone);
+      if (existing) {
+        const newHistory = [...(existing.history || []), makeHistoryEntry(existing)];
+        const updatePayload = { ...cardData, history: newHistory, updated_at: new Date().toISOString() };
+        delete updatePayload.user_id; // 소유자는 유지
+        const { error } = await sb
+          .from('business_cards')
+          .update(updatePayload)
+          .eq('id', existing.id);
+        if (error) throw error;
+        return { id: existing.id, hubspot_id: existing.hubspot_id || null, merged: true };
+      }
+    }
+
+    const { data, error } = await sb
+      .from('business_cards')
+      .insert([cardData])
+      .select('id, hubspot_id')
+      .single();
+    if (error) throw error;
+    return { id: data.id, hubspot_id: data.hubspot_id || null, merged: false };
+  };
+
+  // 만남 기록 1건 추가. 행사명은 정리해서, 빈 메모는 null 로 저장한다.
+  const insertMeeting = async (cardId, { met_on, event_name, shared_memo, personal_memo }) => {
+    const sb = getSupabaseClient();
+    if (!sb) throw new Error('Supabase 연결 설정이 필요합니다.');
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session?.user) throw new Error('로그인이 필요합니다.');
+
+    const { data, error } = await sb
+      .from('card_meetings')
+      .insert({
+        card_id: cardId,
+        user_id: session.user.id,
+        met_on,
+        event_name: normalizeEventName(event_name),
+        shared_memo: blankToNull(shared_memo),
+        personal_memo: blankToNull(personal_memo),
+      })
+      .select('*')
+      .single();
+    if (error) throw error;
+    return data;
+  };
+
   const handleSaveCard = async (e) => {
     e.preventDefault();
+
+    // 일괄 스캔에서 들어온 카드: 저장하지 않고 결과 목록의 해당 행에 편집 내용만 반영
+    // (행의 사람별 메모·전송 스위치 등 기존 값은 유지)
+    if (typeof editingCard._batchIndex === 'number') {
+      const idx = editingCard._batchIndex;
+      const edited = { ...editingCard };
+      delete edited._batchIndex;
+      setBatchResults((prev) =>
+        prev.map((row, i) => {
+          if (i !== idx) return row;
+          const next = { ...row, ...edited, _status: 'success' };
+          delete next._error;
+          return next;
+        })
+      );
+      setEditingCard(null);
+      setCroppedImage(null);
+      return;
+    }
+
     const sb = getSupabaseClient();
     if (!sb) {
       toast.error('Supabase 연결 설정이 필요합니다.');
@@ -1082,35 +1335,45 @@ export default function Home() {
         }
 
         toast.success('명함이 성공적으로 저장되었습니다.');
+        setEditingCard(null);
+        setCroppedImage(null);
+        loadCards();
       } else {
         // 새 스캔 → 동일인(이름 + 핸드폰)이 이미 있으면 history에 이전 값 누적 후 최신 정보로 덮어쓰기
-        const existing = await findDuplicate(cardData.name, cardData.mobile_phone);
-        if (existing) {
-          const newHistory = [...(existing.history || []), makeHistoryEntry(existing)];
-          const updatePayload = { ...cardData, history: newHistory, updated_at: new Date().toISOString() };
-          delete updatePayload.user_id; // 소유자는 유지
-          const { error } = await sb
-            .from('business_cards')
-            .update(updatePayload)
-            .eq('id', existing.id);
-          if (error) throw error;
+        const saved = await saveCardRecord(cardData);
+        if (saved.merged) {
           toast.success(`${cardData.name} 님의 명함이 최신 정보로 업데이트되었고 이전 버전은 히스토리에 저장되었습니다.`);
         } else {
-          const { error } = await sb.from('business_cards').insert([cardData]);
-          if (error) throw error;
           toast.success('명함이 성공적으로 저장되었습니다.');
         }
-      }
 
-      // 일괄 스캔에서 들어온 카드라면 결과 목록에서 해당 항목 제거
-      if (typeof editingCard._batchIndex === 'number') {
-        const removedIndex = editingCard._batchIndex;
-        setBatchResults((prev) => prev.filter((_, i) => i !== removedIndex));
-      }
+        // 만난 정보 기록. 실패해도 명함은 이미 저장됐으므로 따로 알리고 계속 진행한다.
+        const meeting = editingMeeting;
+        if (meeting) {
+          try {
+            await insertMeeting(saved.id, {
+              met_on: meeting.met_on,
+              event_name: meeting.event_name,
+              shared_memo: meeting.memo,
+              personal_memo: null,
+            });
+            loadRecentEvents();
+          } catch (err) {
+            console.error(err);
+            toast.error(`만난 정보 저장 실패: ${err.message}`);
+          }
+        }
 
-      setEditingCard(null);
-      setCroppedImage(null);
-      loadCards();
+        setEditingCard(null);
+        setEditingMeeting(null);
+        setCroppedImage(null);
+        loadCards();
+
+        // HubSpot 전송 (상세 화면의 전송 버튼과 같은 토스트를 띄운다)
+        if (meeting?.send && hubspotConfigured) {
+          await syncToHubSpot({ ...cardData, id: saved.id, hubspot_id: saved.hubspot_id });
+        }
+      }
     } catch (err) {
       console.error(err);
       toast.error(`저장 실패: ${err.message}`);
@@ -1151,8 +1414,9 @@ export default function Home() {
     }
   };
 
-  const syncToHubSpot = async (card) => {
-    setLoading(true);
+  // HubSpot 으로 연락처 + 미완료 만남 파트를 전송한다. 토스트는 띄우지 않고 결과만 돌려준다.
+  // 성공하면 business_cards.hubspot_id 와 card_meetings 의 완료 표시('done' 인 파트만)를 갱신한다.
+  const sendCardToHubSpot = async (card, meetings = []) => {
     try {
       const headers = {
         'Content-Type': 'application/json'
@@ -1161,26 +1425,91 @@ export default function Home() {
         headers['x-hubspot-token'] = settings.hubspotToken;
       }
 
+      const pendingMeetings = (meetings || [])
+        .map((m) => ({ m, pending: pendingParts(m) }))
+        .filter(({ pending }) => hasPending(pending))
+        .map(({ m, pending }) => ({
+          id: m.id,
+          met_on: m.met_on,
+          event_name: m.event_name,
+          shared_memo: m.shared_memo,
+          personal_memo: m.personal_memo,
+          pending,
+        }));
+
       const res = await fetch('/api/hubspot', {
         method: 'POST',
         headers,
-        body: JSON.stringify(card),
+        body: JSON.stringify({ ...card, meetings: pendingMeetings }),
       });
 
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'HubSpot 연동 실패');
+      if (!res.ok) {
+        return { ok: false, error: result.error || 'HubSpot 연동 실패', meetingResults: [] };
+      }
 
+      const meetingResults = Array.isArray(result.meetings) ? result.meetings : [];
       const sb = getSupabaseClient();
       if (sb) {
-        await sb
-          .from('business_cards')
-          .update({ hubspot_id: result.id })
-          .eq('id', card.id);
+        if (card.id) {
+          await sb
+            .from('business_cards')
+            .update({ hubspot_id: result.id })
+            .eq('id', card.id);
+        }
 
+        for (const r of meetingResults) {
+          if (!r?.id) continue;
+          const patch = {};
+          if (r.event === 'done') patch.hs_event_done = true;
+          if (r.date === 'done') patch.hs_date_done = true;
+          if (r.note === 'done' && r.note_id) patch.hs_note_id = String(r.note_id);
+          if (Object.keys(patch).length === 0) continue;
+          const { error } = await sb.from('card_meetings').update(patch).eq('id', r.id);
+          if (error) console.warn('만남 동기화 상태 저장 실패:', error.message);
+        }
+      }
+
+      return { ok: true, hubspot_id: result.id, result, meetingResults };
+    } catch (err) {
+      console.error(err);
+      return { ok: false, error: err.message, meetingResults: [] };
+    }
+  };
+
+  // 상세 화면 등에서 쓰는 HubSpot 전송: 그 카드의 만남 기록을 함께 보내고 결과를 토스트로 알린다.
+  const syncToHubSpot = async (card) => {
+    setLoading(true);
+    try {
+      const sb = getSupabaseClient();
+
+      let meetings = [];
+      if (sb && card.id) {
+        const { data, error } = await sb
+          .from('card_meetings')
+          .select('*')
+          .eq('card_id', card.id)
+          .order('met_on', { ascending: true });
+        if (error) {
+          // card_meetings 테이블이 아직 없을 수 있음. 연락처 전송은 계속한다.
+          console.warn('만남 기록 로드 실패 (테이블 미생성 가능):', error.message);
+        } else {
+          meetings = data || [];
+        }
+      }
+
+      const sent = await sendCardToHubSpot(card, meetings);
+      if (!sent.ok) throw new Error(sent.error || 'HubSpot 연동 실패');
+      const result = sent.result;
+
+      if (sb) {
         if (viewingCard && viewingCard.id === card.id) {
           setViewingCard(prev => ({ ...prev, hubspot_id: result.id }));
         }
         loadCards();
+        fetchCardMeetings(card.id).then((rows) => {
+          if (rows) setMeetingsState({ cardId: card.id, rows });
+        });
       }
 
       if (result.merged) {
@@ -1204,6 +1533,13 @@ export default function Home() {
           toast.success(`커뮤니케이션 구독 ${subs.subscribed.length}건을 구독으로 변경했습니다.`);
         }
       }
+
+      // 만남 정보(행사/날짜/노트) 중 실패한 파트가 있으면 따로 알린다
+      const failed = sent.meetingResults.filter(r => [r.event, r.date, r.note].includes('failed'));
+      if (failed.length > 0) {
+        const errors = failed.flatMap(r => r.errors || []);
+        toast.error(`HubSpot 일부 반영 실패: ${errors.length ? errors.join(', ') : '알 수 없는 오류'}`);
+      }
     } catch (err) {
       console.error(err);
       toast.error(`HubSpot 연동 오류: ${err.message}`);
@@ -1226,6 +1562,15 @@ export default function Home() {
     if (activeGroupId === 'ungrouped') return memberOf.length === 0;
     return memberOf.includes(activeGroupId);
   });
+
+  // 편집 폼: 새 한 장 스캔일 때만 "만난 정보" 박스를 보이고, 상황에 맞는 제출 버튼 문구를 고른다
+  const isBatchEdit = !!editingCard && typeof editingCard._batchIndex === 'number';
+  const showMeeting = !!editingCard && !editingCard.id && !isBatchEdit;
+  const editSubmitLabel = isBatchEdit
+    ? '목록에 반영'
+    : showMeeting && hubspotConfigured && editingMeeting?.send
+      ? '저장 + HubSpot 전송'
+      : '명함 지갑에 보관';
 
   // 날짜별 그룹핑
   const groupedByDate = React.useMemo(() => {
@@ -1586,6 +1931,12 @@ export default function Home() {
                   onSelect={handleSelectBatchResult}
                   onSaveAll={handleSaveBatchAll}
                   onClose={() => setBatchResults([])}
+                  meeting={batchMeeting}
+                  onMeetingChange={handleBatchMeetingChange}
+                  recentEvents={recentEvents}
+                  showSendSwitch={hubspotConfigured}
+                  onRowChange={handleBatchRowChange}
+                  sendProgress={sendProgress}
                 />
               )}
 
@@ -1609,8 +1960,14 @@ export default function Home() {
                   formRef={editFormRef}
                   onChange={(patch) => setEditingCard(prev => ({ ...prev, ...patch }))}
                   onRemoveBack={() => setEditingCard(prev => ({ ...prev, back_image_url: null }))}
-                  onCancel={() => { setEditingCard(null); setCroppedImage(null); }}
+                  onCancel={() => { setEditingCard(null); setEditingMeeting(null); setCroppedImage(null); }}
                   onSubmit={handleSaveCard}
+                  meeting={editingMeeting}
+                  onMeetingChange={(patch) => setEditingMeeting(prev => ({ ...(prev || freshMeeting()), ...patch }))}
+                  recentEvents={recentEvents}
+                  showMeeting={showMeeting}
+                  showSendSwitch={hubspotConfigured}
+                  submitLabel={editSubmitLabel}
                 />
               )}
 
@@ -1920,6 +2277,8 @@ export default function Home() {
               activeGroupIds={cardGroupMap[viewingCard.id] || []}
               onToggleGroup={toggleCardGroup}
               onOpenImage={setLightboxImage}
+              meetings={viewingMeetings}
+              hubspotConfigured={hubspotConfigured}
       />
             <div className="detail-pane-actions">{detailActions}</div>
           </>
@@ -1951,6 +2310,8 @@ export default function Home() {
             activeGroupIds={cardGroupMap[viewingCard.id] || []}
             onToggleGroup={toggleCardGroup}
             onOpenImage={setLightboxImage}
+              meetings={viewingMeetings}
+              hubspotConfigured={hubspotConfigured}
           />
         </Sheet>
       )}

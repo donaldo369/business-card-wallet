@@ -114,7 +114,45 @@ CREATE POLICY "Users can delete own group members" ON public.card_group_members
 
 
 -- ------------------------------------------------------------
--- 4. Storage — card-images 버킷
+-- 4. card_meetings — 명함별 만남 기록 (만난 날짜, 행사명, 메모)
+--    hs_*_done / hs_note_id 는 HubSpot 동기화 항목별 완료 상태
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.card_meetings (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    card_id UUID REFERENCES public.business_cards(id) ON DELETE CASCADE NOT NULL,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+    met_on DATE NOT NULL,
+    event_name TEXT,
+    shared_memo TEXT,
+    personal_memo TEXT,
+    hs_event_done BOOLEAN NOT NULL DEFAULT false,
+    hs_date_done BOOLEAN NOT NULL DEFAULT false,
+    hs_note_id TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+CREATE INDEX IF NOT EXISTS card_meetings_card_id_idx ON public.card_meetings(card_id);
+CREATE INDEX IF NOT EXISTS card_meetings_user_id_created_at_idx ON public.card_meetings(user_id, created_at DESC);
+
+ALTER TABLE public.card_meetings ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can read own meetings"   ON public.card_meetings;
+DROP POLICY IF EXISTS "Users can insert own meetings" ON public.card_meetings;
+DROP POLICY IF EXISTS "Users can update own meetings" ON public.card_meetings;
+DROP POLICY IF EXISTS "Users can delete own meetings" ON public.card_meetings;
+
+CREATE POLICY "Users can read own meetings" ON public.card_meetings
+    FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own meetings" ON public.card_meetings
+    FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update own meetings" ON public.card_meetings
+    FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can delete own meetings" ON public.card_meetings
+    FOR DELETE USING (auth.uid() = user_id);
+
+
+-- ------------------------------------------------------------
+-- 5. Storage — card-images 버킷
 --    읽기는 공개(명함 이미지를 <img>로 표시해야 함),
 --    쓰기는 로그인 사용자로 제한.
 --    anon 키는 NEXT_PUBLIC_ 으로 브라우저에 노출되므로

@@ -1562,3 +1562,50 @@ body {
 .cards-grid-compact .card-item:hover {
   transform: none;
 }
+
+/* Meeting info box (만난 정보) */
+.meeting-info-box {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.meeting-info-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.meeting-info-count {
+  margin-left: 6px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.meeting-chip-row {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.meeting-date-hidden {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.meeting-send-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}

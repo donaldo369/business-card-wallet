@@ -4,6 +4,7 @@ import {
   matchSubscriptions,
   buildStatusBody,
 } from '../../../lib/hubspotSubscriptions.mjs';
+import { syncMeetingParts } from '../../../lib/hubspotMeetingSync.mjs';
 
 const COMM_PREF_BASE = 'https://api.hubapi.com/communication-preferences/v4';
 
@@ -16,14 +17,52 @@ const describeSubscriptionError = (status, body) => {
   return body?.message || `구독 상태 변경에 실패했습니다 (HTTP ${status}).`;
 };
 
+// GET/POST 가 같은 규칙으로 토큰을 찾는다. 서버 환경 변수가 우선이고,
+// 헤더로 "undefined" 또는 "null" 문자열이 들어오는 경우는 없는 것으로 본다.
+const resolveToken = (req) => {
+  const token = process.env.HUBSPOT_ACCESS_TOKEN || req.headers.get('x-hubspot-token');
+  if (!token || token === 'undefined' || token === 'null') return null;
+  return token;
+};
+
+// 토큰 설정 여부만 알려준다. 요청 헤더를 읽으므로 정적으로 캐시되지 않으며, 토큰 값은 응답하지 않는다.
+export async function GET(req) {
+  return NextResponse.json({ configured: Boolean(resolveToken(req)) });
+}
+
+// 만남 반영은 부가 작업이다. 예외가 나도 연락처 저장 성공 응답은 유지한다.
+const MET_ON_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+const failedMeetingResult = (m, message) => ({
+  id: m?.id,
+  event: 'failed',
+  date: 'failed',
+  note: 'failed',
+  note_id: null,
+  errors: [message],
+});
+
+const runMeetingSync = async (token, contactId, meetings) => {
+  if (!Array.isArray(meetings) || meetings.length === 0) return [];
+  // 만난 날짜 형식이 틀린 만남은 HubSpot 에 보내지 않고 실패로 알려준다 (조용히 버리지 않음).
+  const valid = meetings.filter((m) => MET_ON_PATTERN.test(String(m?.met_on ?? '')));
+  const invalidResults = meetings
+    .filter((m) => !valid.includes(m))
+    .map((m) => failedMeetingResult(m, '만난 날짜 형식이 올바르지 않습니다.'));
+  if (valid.length === 0) return invalidResults;
+  try {
+    const synced = await syncMeetingParts({ fetchFn: fetch, token }, contactId, valid);
+    return [...synced, ...invalidResults];
+  } catch (err) {
+    console.error('[HubSpot Sync] meeting sync error:', err);
+    const message = `만남 정보 반영 중 오류가 발생했습니다: ${err.message}`;
+    return [...valid.map((m) => failedMeetingResult(m, message)), ...invalidResults];
+  }
+};
+
 export async function POST(req) {
   try {
-    let hubspotToken = process.env.HUBSPOT_ACCESS_TOKEN || req.headers.get('x-hubspot-token');
-    
-    // "undefined" 또는 "null" 문자열이 들어오는 경우 예외 처리
-    if (hubspotToken === 'undefined' || hubspotToken === 'null') {
-      hubspotToken = null;
-    }
+    const hubspotToken = resolveToken(req);
 
     if (!hubspotToken) {
       return NextResponse.json(
@@ -32,7 +71,7 @@ export async function POST(req) {
       );
     }
 
-    const { name, first_name, last_name, company, email, title, office_phone, mobile_phone, address, hubspot_id } = await req.json();
+    const { name, first_name, last_name, company, email, title, office_phone, mobile_phone, address, hubspot_id, meetings } = await req.json();
 
     // 보안을 위해 앞 10자리와 길이만 로그에 기록하여 올바른 토큰 타입(pat-로 시작)인지 확인
     console.log(`[HubSpot Sync] Token check - Length: ${hubspotToken.length}, Starts with: "${hubspotToken.substring(0, 10)}..."`);
@@ -174,7 +213,8 @@ export async function POST(req) {
         const patched = await patchExisting(existingId);
         if (patched.ok) {
           const subscriptions = await syncSubscriptions();
-          return NextResponse.json({ success: true, id: existingId, merged: true, subscriptions });
+          const meetingResults = await runMeetingSync(hubspotToken, existingId, meetings);
+          return NextResponse.json({ success: true, id: existingId, merged: true, subscriptions, meetings: meetingResults });
         }
         console.error(`HubSpot PATCH after conflict failed [${patched.status}]:`, patched.result);
         return NextResponse.json(
@@ -197,7 +237,9 @@ export async function POST(req) {
     }
 
     const subscriptions = await syncSubscriptions();
-    return NextResponse.json({ success: true, id: hubspot_id || result.id, subscriptions });
+    const contactId = hubspot_id || result.id;
+    const meetingResults = await runMeetingSync(hubspotToken, contactId, meetings);
+    return NextResponse.json({ success: true, id: contactId, subscriptions, meetings: meetingResults });
   } catch (error) {
     console.error('HubSpot Sync Error:', error);
     return NextResponse.json(

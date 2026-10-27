@@ -2,12 +2,28 @@
 
 import React, { useId } from 'react';
 import { Save, Sparkles, X } from 'lucide-react';
+import MeetingInfoBox from './MeetingInfoBox';
 
 /**
  * OCR 추출 결과를 사람이 검토·교정하는 폼.
  * onChange 는 바뀐 필드만 담은 patch 를 넘기고, 병합은 호출자가 한다.
+ * showMeeting 이면 입력 칸 맨 위(이름보다 위, 전체 폭)에 "만난 정보" 박스를 함께 보여준다.
  */
-export default function CardEditForm({ card, loading, formRef, onChange, onRemoveBack, onCancel, onSubmit }) {
+export default function CardEditForm({
+  card,
+  loading,
+  formRef,
+  onChange,
+  onRemoveBack,
+  onCancel,
+  onSubmit,
+  meeting,
+  onMeetingChange,
+  recentEvents = [],
+  showMeeting = false,
+  showSendSwitch = false,
+  submitLabel = '명함 지갑에 보관',
+}) {
   const uid = useId();
   return (
       <div ref={formRef} className="glass" style={{ padding: '28px', scrollMarginTop: '24px' }}>
@@ -96,6 +112,17 @@ export default function CardEditForm({ card, loading, formRef, onChange, onRemov
 
             {/* 오른쪽 폼 입력 영역 */}
             <div className="form-grid" style={{ flex: 1 }}>
+              {showMeeting && meeting && (
+                <div className="form-group-full">
+                  <MeetingInfoBox
+                    value={meeting}
+                    onChange={onMeetingChange}
+                    recentEvents={recentEvents}
+                    showSendSwitch={showSendSwitch}
+                    memoLabel="메모 (선택)"
+                  />
+                </div>
+              )}
               <div className="form-group">
                 <label htmlFor={`${uid}-f0`}>성 (Last Name)</label>
                 <input
@@ -212,7 +239,7 @@ export default function CardEditForm({ card, loading, formRef, onChange, onRemov
             </button>
             <button type="submit" disabled={loading} className="btn btn-primary">
               <Save size={14} />
-              명함 지갑에 보관
+              {submitLabel}
             </button>
           </div>
         </form>
