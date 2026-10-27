@@ -75,6 +75,17 @@ test('새 행사명은 기존 옵션을 모두 포함해 PATCH 한다', async ()
   assert.equal(calls[0].headers.Authorization, 'Bearer tok');
 });
 
+test('기존 옵션의 설명(description)은 PATCH 해도 지워지지 않는다', async () => {
+  const { ctx, calls } = setup([
+    ['GET', PROP_URL, prop([{ label: 'A', value: 'A', displayOrder: 0, hidden: false, description: '2025 박람회' }])],
+    ['PATCH', PROP_URL, { status: 200, body: {} }],
+  ]);
+  await ensureEventOption(ctx, 'B');
+  const patch = calls.find(c => c.method === 'PATCH');
+  assert.equal(patch.body.options[0].description, '2025 박람회');
+  assert.equal('description' in patch.body.options[1], false);
+});
+
 test('칸이 없으면(404) 체크박스 칸을 만든다', async () => {
   const { ctx, calls } = setup([
     ['GET', PROP_URL, { status: 404 }],

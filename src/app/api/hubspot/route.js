@@ -183,7 +183,7 @@ export async function POST(req) {
         },
         body: JSON.stringify({ properties }),
       });
-      const patchResult = await patchRes.json();
+      const patchResult = await patchRes.json().catch(() => ({}));
       return { ok: patchRes.ok, status: patchRes.status, result: patchResult };
     };
 
@@ -215,7 +215,8 @@ export async function POST(req) {
       });
     }
 
-    const result = await response.json();
+    // 오류 응답 본문이 JSON 이 아닐 수도 있다
+    const result = await response.json().catch(() => ({}));
 
     // 신규 등록 시도 중 "이미 존재" 응답을 받으면, 응답에서 기존 ID를 추출해 PATCH로 대체.
     // HubSpot 메시지 예: "Contact already exists. Existing ID: 476110062308"

@@ -66,13 +66,14 @@ const EVENT_PROPERTY_BASE = {
   groupName: 'contactinformation',
 };
 
-// 2026-09 OptionInput 은 label/value/displayOrder/hidden 을 모두 요구하고 그 밖의 필드는 받지 않는다.
-// GET 응답의 옵션에는 description 등 다른 필드가 섞여 있으므로 필요한 것만 추려 보낸다.
+// 2026-09 OptionInput 은 label/value/displayOrder/hidden 이 필수이고 description 을 선택으로 받는다.
+// PATCH 는 옵션 목록을 통째로 덮어쓰므로 기존 옵션의 description 도 그대로 실어 보내야 지워지지 않는다.
 const toOptionInput = (o, i) => ({
   label: o.label,
   value: o.value,
   displayOrder: Number.isInteger(o.displayOrder) ? o.displayOrder : i,
   hidden: Boolean(o.hidden),
+  ...(o.description ? { description: o.description } : {}),
 });
 
 /** 행사 체크박스 칸에 행사 옵션이 있도록 보장하고 옵션 value 를 돌려준다 */

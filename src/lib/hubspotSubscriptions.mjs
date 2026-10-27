@@ -23,15 +23,16 @@ const normalizeName = (name) => String(name ?? '').trim().replace(/\s+/g, ' ').t
 
 /**
  * 구독 정의 목록에서 대상 구독을 이름으로 찾는다.
- * @param {Array<{id: string|number, name: string, channel?: string}>} definitions
+ * @param {Array<{id: string|number, name: string, channel?: string, isActive?: boolean}>} definitions
  * @param {string[]} wantedNames
  * @returns {{ matched: Array<{id: string, name: string}>, missing: string[] }}
  *          matched 는 wantedNames 순서를 따르고, missing 은 못 찾은 이름들.
  */
 export function matchSubscriptions(definitions, wantedNames) {
   const emailDefs = (definitions || []).filter(
-    // channel 이 응답에 없는 경우도 있어, 있을 때만 EMAIL 로 제한한다
-    (d) => d && (d.channel === undefined || d.channel === SUBSCRIPTION_CHANNEL)
+    // 2026-09 정의에는 channel 이 없고 isActive 가 온다. 비활성 구독은 대상에서 빼고,
+    // channel 이 있을 때만(이전 버전 응답) EMAIL 로 제한한다
+    (d) => d && d.isActive !== false && (d.channel === undefined || d.channel === SUBSCRIPTION_CHANNEL)
   );
 
   const matched = [];
