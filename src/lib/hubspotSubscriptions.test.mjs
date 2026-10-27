@@ -55,6 +55,16 @@ test('EMAIL 이 아닌 채널의 동명 구독은 제외한다', () => {
   assert.deepEqual(matched.map(m => m.id), ['email']);
 });
 
+test('비활성(isActive: false) 구독은 제외한다', () => {
+  // 2026-09 정의에는 channel 이 없고 isActive 가 필수로 온다
+  const defs = [
+    { id: '1', name: 'One to One', isActive: false },
+    { id: '2', name: 'One to One', isActive: true },
+  ];
+  const { matched } = matchSubscriptions(defs, ['One to One']);
+  assert.deepEqual(matched.map(m => m.id), ['2']);
+});
+
 test('같은 이름이 여러 개면 첫 번째만 쓴다', () => {
   const dupes = [
     { id: 'a', name: '뉴스레터 구독 동의' },
@@ -72,8 +82,9 @@ test('정의 목록이 비어 있으면 전부 missing', () => {
 
 test('구독 요청 본문을 스펙대로 만든다', () => {
   // 이메일은 URL 경로(subscriberIdString)로 들어가므로 본문에는 없다
+  // 2026-09 API 는 subscriptionId 를 정수(int64)로 받는다
   assert.deepEqual(buildStatusBody('111'), {
-    subscriptionId: '111',
+    subscriptionId: 111,
     statusState: 'SUBSCRIBED',
     legalBasis: LEGAL_BASIS,
     legalBasisExplanation: LEGAL_BASIS_EXPLANATION,

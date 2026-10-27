@@ -45,7 +45,7 @@ function meeting(over = {}) {
   return { ...m, pending: pendingParts(m), ...(over.pending ? { pending: over.pending } : {}) };
 }
 
-const PROP_URL = `/crm/v3/properties/contacts/${EVENT_PROPERTY}`;
+const PROP_URL = `/crm/properties/2026-09/contacts/${EVENT_PROPERTY}`;
 const prop = options => ({ status: 200, body: { name: EVENT_PROPERTY, options } });
 const opt = (v, i = 0) => ({ label: v, value: v, displayOrder: i });
 const contactGet = (events, date) => ({ status: 200, body: { id: '1', properties: { met_events: events, last_met_date: date } } });
@@ -66,14 +66,30 @@ test('새 행사명은 기존 옵션을 모두 포함해 PATCH 한다', async ()
   const patch = calls.find(c => c.method === 'PATCH');
   assert.deepEqual(patch.body.options.map(o => o.value), ['A', 'B']);
   assert.equal(patch.body.options[1].displayOrder, 1);
+  // 2026-09 OptionInput 은 label/value/displayOrder/hidden 이 모두 필수
+  assert.deepEqual(patch.body.options, [
+    { label: 'A', value: 'A', displayOrder: 0, hidden: false },
+    { label: 'B', value: 'B', displayOrder: 1, hidden: false },
+  ]);
   assert.deepEqual(r, { value: 'B' });
   assert.equal(calls[0].headers.Authorization, 'Bearer tok');
+});
+
+test('기존 옵션의 설명(description)은 PATCH 해도 지워지지 않는다', async () => {
+  const { ctx, calls } = setup([
+    ['GET', PROP_URL, prop([{ label: 'A', value: 'A', displayOrder: 0, hidden: false, description: '2025 박람회' }])],
+    ['PATCH', PROP_URL, { status: 200, body: {} }],
+  ]);
+  await ensureEventOption(ctx, 'B');
+  const patch = calls.find(c => c.method === 'PATCH');
+  assert.equal(patch.body.options[0].description, '2025 박람회');
+  assert.equal('description' in patch.body.options[1], false);
 });
 
 test('칸이 없으면(404) 체크박스 칸을 만든다', async () => {
   const { ctx, calls } = setup([
     ['GET', PROP_URL, { status: 404 }],
-    ['POST', '/crm/v3/properties/contacts', { status: 201, body: {} }],
+    ['POST', '/crm/properties/2026-09/contacts', { status: 201, body: {} }],
   ]);
   const r = await ensureEventOption(ctx, 'A');
   const post = calls.find(c => c.method === 'POST');
@@ -81,7 +97,7 @@ test('칸이 없으면(404) 체크박스 칸을 만든다', async () => {
   assert.equal(post.body.fieldType, 'checkbox');
   assert.equal(post.body.type, 'enumeration');
   assert.equal(post.body.label, '참석 행사');
-  assert.deepEqual(post.body.options.map(o => o.value), ['A']);
+  assert.deepEqual(post.body.options, [{ label: 'A', value: 'A', displayOrder: 0, hidden: false }]);
   assert.deepEqual(r, { value: 'A' });
 });
 
@@ -98,12 +114,12 @@ test('ensureEventOption: 빈 행사명은 error', async () => {
 });
 
 test('ensureDateProperty: 있으면 ok, 404 면 date 칸 생성', async () => {
-  const dateUrl = `/crm/v3/properties/contacts/${DATE_PROPERTY}`;
+  const dateUrl = `/crm/properties/2026-09/contacts/${DATE_PROPERTY}`;
   let s = setup([['GET', dateUrl, { status: 200, body: {} }]]);
   assert.deepEqual(await ensureDateProperty(s.ctx), { ok: true });
   s = setup([
     ['GET', dateUrl, { status: 404 }],
-    ['POST', '/crm/v3/properties/contacts', { status: 201, body: {} }],
+    ['POST', '/crm/properties/2026-09/contacts', { status: 201, body: {} }],
   ]);
   assert.deepEqual(await ensureDateProperty(s.ctx), { ok: true });
   const post = s.calls.find(c => c.method === 'POST');
@@ -115,18 +131,18 @@ test('ensureDateProperty: 있으면 ok, 404 면 date 칸 생성', async () => {
 
 test('기존 참석 행사를 보존하고 새 행사를 추가한다', async () => {
   const { ctx, calls } = setup([
-    ['GET', '/objects/contacts/1', contactGet('A', '2026-09-01')],
+    ['GET', '/crm/objects/2026-09/contacts/1', contactGet('A', '2026-09-01')],
     ['GET', PROP_URL, prop([opt('A')])],
     ['PATCH', PROP_URL, { status: 200 }],
-    ['GET', `/crm/v3/properties/contacts/${DATE_PROPERTY}`, { status: 200 }],
-    ['PATCH', '/objects/contacts/1', { status: 200 }],
-    ['POST', '/crm/v3/objects/notes', { status: 201, body: { id: '5' } }],
+    ['GET', `/crm/properties/2026-09/contacts/${DATE_PROPERTY}`, { status: 200 }],
+    ['PATCH', '/crm/objects/2026-09/contacts/1', { status: 200 }],
+    ['POST', '/crm/objects/2026-09/notes', { status: 201, body: { id: '5' } }],
   ]);
   const [r] = await syncMeetingParts(ctx, '1', [meeting({ event_name: 'B', met_on: '2026-10-24' })]);
-  const contactPatch = calls.find(c => c.method === 'PATCH' && c.url.includes('/objects/contacts/1'));
+  const contactPatch = calls.find(c => c.method === 'PATCH' && c.url.includes('/crm/objects/2026-09/contacts/1'));
   assert.equal(contactPatch.body.properties.met_events, 'A;B');
   assert.equal(contactPatch.body.properties.last_met_date, '2026-10-24');
-  assert.equal(calls.filter(c => c.method === 'PATCH' && c.url.includes('/objects/contacts/')).length, 1);
+  assert.equal(calls.filter(c => c.method === 'PATCH' && c.url.includes('/crm/objects/2026-09/contacts/')).length, 1);
   assert.equal(r.event, 'done');
   assert.equal(r.date, 'done');
   assert.equal(r.note, 'done'); // 행사명만 있어도 노트 본문이 생긴다
@@ -135,24 +151,24 @@ test('기존 참석 행사를 보존하고 새 행사를 추가한다', async ()
 
 test('만난 날짜가 기존보다 과거면 최근 만난 날짜를 바꾸지 않는다', async () => {
   const { ctx, calls } = setup([
-    ['GET', '/objects/contacts/1', contactGet('', '2026-10-24')],
-    ['GET', `/crm/v3/properties/contacts/${DATE_PROPERTY}`, { status: 200 }],
+    ['GET', '/crm/objects/2026-09/contacts/1', contactGet('', '2026-10-24')],
+    ['GET', `/crm/properties/2026-09/contacts/${DATE_PROPERTY}`, { status: 200 }],
   ]);
   const [r] = await syncMeetingParts(ctx, '1', [meeting({ event_name: null, met_on: '2026-09-01' })]);
-  assert.equal(calls.some(c => c.method === 'PATCH' && c.url.includes('/objects/contacts/')), false);
+  assert.equal(calls.some(c => c.method === 'PATCH' && c.url.includes('/crm/objects/2026-09/contacts/')), false);
   assert.equal(r.date, 'done');
   assert.equal(r.event, 'skipped');
 });
 
 test('노트는 연락처에 연결해 만들고 note_id 를 돌려준다', async () => {
   const { ctx, calls } = setup([
-    ['GET', '/objects/contacts/1', contactGet(null, null)],
-    ['GET', `/crm/v3/properties/contacts/${DATE_PROPERTY}`, { status: 200 }],
-    ['PATCH', '/objects/contacts/1', { status: 200 }],
-    ['POST', '/crm/v3/objects/notes', { status: 201, body: { id: '777' } }],
+    ['GET', '/crm/objects/2026-09/contacts/1', contactGet(null, null)],
+    ['GET', `/crm/properties/2026-09/contacts/${DATE_PROPERTY}`, { status: 200 }],
+    ['PATCH', '/crm/objects/2026-09/contacts/1', { status: 200 }],
+    ['POST', '/crm/objects/2026-09/notes', { status: 201, body: { id: '777' } }],
   ]);
   const [r] = await syncMeetingParts(ctx, '1', [meeting({ shared_memo: '견적 요청' })]);
-  const notePost = calls.find(c => c.url.endsWith('/crm/v3/objects/notes'));
+  const notePost = calls.find(c => c.url.endsWith('/crm/objects/2026-09/notes'));
   assert.equal(notePost.body.associations[0].types[0].associationTypeId, 202);
   assert.equal(notePost.body.associations[0].types[0].associationCategory, 'HUBSPOT_DEFINED');
   assert.equal(notePost.body.associations[0].to.id, '1');
@@ -164,11 +180,11 @@ test('노트는 연락처에 연결해 만들고 note_id 를 돌려준다', asyn
 
 test('속성 권한 403 이면 행사만 실패하고 노트는 진행한다', async () => {
   const { ctx } = setup([
-    ['GET', '/objects/contacts/1', contactGet(null, null)],
+    ['GET', '/crm/objects/2026-09/contacts/1', contactGet(null, null)],
     ['GET', PROP_URL, { status: 403 }],
-    ['GET', `/crm/v3/properties/contacts/${DATE_PROPERTY}`, { status: 200 }],
-    ['PATCH', '/objects/contacts/1', { status: 200 }],
-    ['POST', '/crm/v3/objects/notes', { status: 201, body: { id: '9' } }],
+    ['GET', `/crm/properties/2026-09/contacts/${DATE_PROPERTY}`, { status: 200 }],
+    ['PATCH', '/crm/objects/2026-09/contacts/1', { status: 200 }],
+    ['POST', '/crm/objects/2026-09/notes', { status: 201, body: { id: '9' } }],
   ]);
   const [r] = await syncMeetingParts(ctx, '1', [meeting({ event_name: 'A', shared_memo: 'x' })]);
   assert.equal(r.event, 'failed');
@@ -179,8 +195,8 @@ test('속성 권한 403 이면 행사만 실패하고 노트는 진행한다', a
 
 test('노트 403 이면 note 만 실패하고 노트 권한 안내를 넣는다', async () => {
   const { ctx } = setup([
-    ['GET', '/objects/contacts/1', contactGet(null, null)],
-    ['POST', '/crm/v3/objects/notes', { status: 403 }],
+    ['GET', '/crm/objects/2026-09/contacts/1', contactGet(null, null)],
+    ['POST', '/crm/objects/2026-09/notes', { status: 403 }],
   ]);
   const [r] = await syncMeetingParts(ctx, '1', [
     meeting({ shared_memo: 'x', pending: { event: false, date: false, note: true } }),
@@ -192,10 +208,10 @@ test('노트 403 이면 note 만 실패하고 노트 권한 안내를 넣는다'
 
 test('연락처 PATCH 가 실패하면 event/date 모두 failed', async () => {
   const { ctx } = setup([
-    ['GET', '/objects/contacts/1', contactGet(null, null)],
+    ['GET', '/crm/objects/2026-09/contacts/1', contactGet(null, null)],
     ['GET', PROP_URL, prop([opt('A')])],
-    ['GET', `/crm/v3/properties/contacts/${DATE_PROPERTY}`, { status: 200 }],
-    ['PATCH', '/objects/contacts/1', { status: 500, body: { message: 'boom' } }],
+    ['GET', `/crm/properties/2026-09/contacts/${DATE_PROPERTY}`, { status: 200 }],
+    ['PATCH', '/crm/objects/2026-09/contacts/1', { status: 500, body: { message: 'boom' } }],
   ]);
   const [r] = await syncMeetingParts(ctx, '1', [meeting({ event_name: 'A' })]);
   assert.equal(r.event, 'failed');
@@ -204,7 +220,7 @@ test('연락처 PATCH 가 실패하면 event/date 모두 failed', async () => {
 });
 
 test('연락처 조회가 실패하면 모든 대기 파트가 failed', async () => {
-  const { ctx } = setup([['GET', '/objects/contacts/1', { status: 404, body: { message: 'nope' } }]]);
+  const { ctx } = setup([['GET', '/crm/objects/2026-09/contacts/1', { status: 404, body: { message: 'nope' } }]]);
   const [r] = await syncMeetingParts(ctx, '1', [meeting({ event_name: 'A', shared_memo: 'x' })]);
   assert.equal(r.event, 'failed');
   assert.equal(r.date, 'failed');
