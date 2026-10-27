@@ -6,7 +6,9 @@ import {
 } from '../../../lib/hubspotSubscriptions.mjs';
 import { syncMeetingParts } from '../../../lib/hubspotMeetingSync.mjs';
 
-const COMM_PREF_BASE = 'https://api.hubapi.com/communication-preferences/v4';
+// HubSpot 날짜 기반 API 버전. 번호 버전(v3/v4)은 2027년에 지원이 끝난다.
+const COMM_PREF_BASE = 'https://api.hubapi.com/communication-preferences/2026-09';
+const CONTACTS_BASE = 'https://api.hubapi.com/crm/objects/2026-09/contacts';
 
 // 구독 API 실패를 사용자가 조치할 수 있는 문구로 바꾼다.
 // 403 은 대부분 Private App 토큰에 스코프가 없는 경우라 따로 안내한다.
@@ -161,8 +163,19 @@ export async function POST(req) {
       }
     };
 
+    // 이미 존재(409)인데 메시지에서 ID 를 못 읽은 경우를 위한 대비: 이메일로 기존 연락처를 찾는다
+    const findContactIdByEmail = async () => {
+      if (!email) return null;
+      const res = await fetch(`${CONTACTS_BASE}/${encodeURIComponent(email)}?idProperty=email`, {
+        headers: { 'Authorization': `Bearer ${hubspotToken}` },
+      });
+      if (!res.ok) return null;
+      const body = await res.json().catch(() => ({}));
+      return body?.id ? String(body.id) : null;
+    };
+
     const patchExisting = async (existingId) => {
-      const patchRes = await fetch(`https://api.hubapi.com/crm/v3/objects/contacts/${existingId}`, {
+      const patchRes = await fetch(`${CONTACTS_BASE}/${existingId}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -179,7 +192,7 @@ export async function POST(req) {
 
     if (hubspot_id) {
       // 2-1. 기존 연락처 수정 (PATCH)
-      url = `https://api.hubapi.com/crm/v3/objects/contacts/${hubspot_id}`;
+      url = `${CONTACTS_BASE}/${hubspot_id}`;
       response = await fetch(url, {
         method: 'PATCH',
         headers: {
@@ -190,14 +203,15 @@ export async function POST(req) {
       });
     } else {
       // 2-2. 신규 연락처 등록 (POST)
-      url = 'https://api.hubapi.com/crm/v3/objects/contacts';
+      url = CONTACTS_BASE;
       response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${hubspotToken}`,
         },
-        body: JSON.stringify({ properties }),
+        // 2026-09 생성 요청은 associations 가 필수다 (연결할 레코드가 없으면 빈 배열)
+        body: JSON.stringify({ properties, associations: [] }),
       });
     }
 
@@ -207,7 +221,8 @@ export async function POST(req) {
     // HubSpot 메시지 예: "Contact already exists. Existing ID: 476110062308"
     if (!response.ok && !hubspot_id) {
       const message = result?.message || '';
-      const existingId = message.match(/Existing ID:\s*(\d+)/i)?.[1];
+      const existingId = message.match(/Existing ID:\s*(\d+)/i)?.[1]
+        || (response.status === 409 ? await findContactIdByEmail() : null);
       if (existingId) {
         console.log(`[HubSpot Sync] Contact already exists (id=${existingId}); patching instead of creating.`);
         const patched = await patchExisting(existingId);

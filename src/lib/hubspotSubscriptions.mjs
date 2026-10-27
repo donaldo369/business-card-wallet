@@ -53,14 +53,16 @@ export function matchSubscriptions(definitions, wantedNames) {
 
 /**
  * 단건 구독 상태 변경 요청의 본문을 만든다.
- * POST /communication-preferences/v4/statuses/{email} 용.
+ * POST /communication-preferences/2026-09/statuses/{email} 용.
  * 배치(batch/write) 엔드포인트는 Marketing Hub Enterprise 전용이라 쓰지 않는다.
  * 구독자 이메일은 URL 경로로 들어가므로 본문에 포함하지 않는다.
- * @param {string} subscriptionId
+ * 2026-09 API 는 subscriptionId 를 정수(int64)로 받으므로 숫자로 바꿔 넣는다.
+ * (정의 목록 응답의 id 는 문자열이다. 구독 ID 는 안전한 정수 범위 안이다.)
+ * @param {string|number} subscriptionId
  */
 export function buildStatusBody(subscriptionId) {
   return {
-    subscriptionId,
+    subscriptionId: Number(subscriptionId),
     statusState: 'SUBSCRIBED',
     legalBasis: LEGAL_BASIS,
     legalBasisExplanation: LEGAL_BASIS_EXPLANATION,

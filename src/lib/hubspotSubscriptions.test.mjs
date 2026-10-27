@@ -72,8 +72,9 @@ test('정의 목록이 비어 있으면 전부 missing', () => {
 
 test('구독 요청 본문을 스펙대로 만든다', () => {
   // 이메일은 URL 경로(subscriberIdString)로 들어가므로 본문에는 없다
+  // 2026-09 API 는 subscriptionId 를 정수(int64)로 받는다
   assert.deepEqual(buildStatusBody('111'), {
-    subscriptionId: '111',
+    subscriptionId: 111,
     statusState: 'SUBSCRIBED',
     legalBasis: LEGAL_BASIS,
     legalBasisExplanation: LEGAL_BASIS_EXPLANATION,

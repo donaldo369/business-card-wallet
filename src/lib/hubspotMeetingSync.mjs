@@ -66,17 +66,26 @@ const EVENT_PROPERTY_BASE = {
   groupName: 'contactinformation',
 };
 
+// 2026-09 OptionInput 은 label/value/displayOrder/hidden 을 모두 요구하고 그 밖의 필드는 받지 않는다.
+// GET 응답의 옵션에는 description 등 다른 필드가 섞여 있으므로 필요한 것만 추려 보낸다.
+const toOptionInput = (o, i) => ({
+  label: o.label,
+  value: o.value,
+  displayOrder: Number.isInteger(o.displayOrder) ? o.displayOrder : i,
+  hidden: Boolean(o.hidden),
+});
+
 /** 행사 체크박스 칸에 행사 옵션이 있도록 보장하고 옵션 value 를 돌려준다 */
 export async function ensureEventOption(ctx, eventName) {
   const name = normalizeEventName(eventName);
   if (!name) return { error: '행사명이 비어 있습니다.' };
-  const propPath = `/crm/v3/properties/contacts/${EVENT_PROPERTY}`;
+  const propPath = `/crm/properties/2026-09/contacts/${EVENT_PROPERTY}`;
 
   const got = await call(ctx, propPath);
   if (got.status === 404) {
-    const created = await call(ctx, '/crm/v3/properties/contacts', {
+    const created = await call(ctx, '/crm/properties/2026-09/contacts', {
       method: 'POST',
-      body: { ...EVENT_PROPERTY_BASE, name: EVENT_PROPERTY, options: [{ label: name, value: name, displayOrder: 0 }] },
+      body: { ...EVENT_PROPERTY_BASE, name: EVENT_PROPERTY, options: [toOptionInput({ label: name, value: name, displayOrder: 0 }, 0)] },
     });
     if (!created.ok) return { error: describeFailure(created, 'schema', '행사 속성을 만들지 못했습니다') };
     return { value: name };
@@ -91,7 +100,7 @@ export async function ensureEventOption(ctx, eventName) {
   // PATCH 는 옵션 목록을 통째로 교체하므로 기존 옵션을 모두 포함해 보낸다
   const patched = await call(ctx, propPath, {
     method: 'PATCH',
-    body: { options: [...options, { label: name, value: name, displayOrder: options.length }] },
+    body: { options: [...options.map(toOptionInput), toOptionInput({ label: name, value: name, displayOrder: options.length }, options.length)] },
   });
   if (!patched.ok) return { error: describeFailure(patched, 'schema', '행사 옵션을 추가하지 못했습니다') };
   return { value: name };
@@ -99,11 +108,11 @@ export async function ensureEventOption(ctx, eventName) {
 
 /** 최근 만난 날짜 칸이 있도록 보장 */
 export async function ensureDateProperty(ctx) {
-  const got = await call(ctx, `/crm/v3/properties/contacts/${DATE_PROPERTY}`);
+  const got = await call(ctx, `/crm/properties/2026-09/contacts/${DATE_PROPERTY}`);
   if (got.ok) return { ok: true };
   if (got.status !== 404) return { error: describeFailure(got, 'schema', '날짜 속성을 읽지 못했습니다') };
 
-  const created = await call(ctx, '/crm/v3/properties/contacts', {
+  const created = await call(ctx, '/crm/properties/2026-09/contacts', {
     method: 'POST',
     body: { name: DATE_PROPERTY, label: '최근 만난 날짜', type: 'date', fieldType: 'date', groupName: 'contactinformation' },
   });
@@ -129,7 +138,7 @@ export async function syncMeetingParts(ctx, contactId, meetings) {
   const fail = (i, msg) => results[i].errors.push(msg);
 
   if (eventIdx.length || dateIdx.length) {
-    const cur = await call(ctx, `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?properties=${EVENT_PROPERTY},${DATE_PROPERTY}`);
+    const cur = await call(ctx, `/crm/objects/2026-09/contacts/${encodeURIComponent(contactId)}?properties=${EVENT_PROPERTY},${DATE_PROPERTY}`);
     if (!cur.ok) {
       const msg = describeFailure(cur, 'contact', '연락처를 읽지 못했습니다');
       for (const i of new Set([...eventIdx, ...dateIdx])) fail(i, msg);
@@ -174,7 +183,7 @@ export async function syncMeetingParts(ctx, contactId, meetings) {
 
       let patched = true;
       if (Object.keys(update).length) {
-        const res = await call(ctx, `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}`, {
+        const res = await call(ctx, `/crm/objects/2026-09/contacts/${encodeURIComponent(contactId)}`, {
           method: 'PATCH',
           body: { properties: update },
         });
@@ -194,7 +203,7 @@ export async function syncMeetingParts(ctx, contactId, meetings) {
   // 노트
   for (const i of idx.filter(i => meetings[i].pending.note)) {
     const m = meetings[i];
-    const res = await call(ctx, '/crm/v3/objects/notes', {
+    const res = await call(ctx, '/crm/objects/2026-09/notes', {
       method: 'POST',
       body: {
         properties: { hs_note_body: buildNoteBody(m), hs_timestamp: `${m.met_on}T12:00:00+09:00` },
