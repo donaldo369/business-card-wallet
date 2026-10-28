@@ -14,6 +14,10 @@ export const TARGET_SUBSCRIPTION_NAMES = [
 export const LEGAL_BASIS = 'CONSENT_WITH_NOTICE';
 export const LEGAL_BASIS_EXPLANATION = '명함을 직접 전달 받음';
 
+// 연락처 속성 hs_legal_basis 의 옵션 값 (위 LEGAL_BASIS 와 같은 근거).
+// 포털에서 GDPR 기능이 켜져 있으면 연락처 생성 시 필수 속성이다.
+export const CONTACT_LEGAL_BASIS = 'Freely given consent from contact';
+
 export const SUBSCRIPTION_CHANNEL = 'EMAIL';
 
 // 구독 유형 이름 비교용 정규화.

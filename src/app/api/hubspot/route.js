@@ -3,6 +3,7 @@ import {
   TARGET_SUBSCRIPTION_NAMES,
   matchSubscriptions,
   buildStatusBody,
+  CONTACT_LEGAL_BASIS,
 } from '../../../lib/hubspotSubscriptions.mjs';
 import { syncMeetingParts } from '../../../lib/hubspotMeetingSync.mjs';
 
@@ -210,8 +211,12 @@ export async function POST(req) {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${hubspotToken}`,
         },
-        // 2026-09 생성 요청은 associations 가 필수다 (연결할 레코드가 없으면 빈 배열)
-        body: JSON.stringify({ properties, associations: [] }),
+        // 2026-09 생성 요청은 associations 가 필수다 (연결할 레코드가 없으면 빈 배열).
+        // GDPR 포털은 생성 시 hs_legal_basis 를 요구한다. 기존 연락처의 값은 덮어쓰지 않도록 생성 때만 넣는다
+        body: JSON.stringify({
+          properties: { ...properties, hs_legal_basis: CONTACT_LEGAL_BASIS },
+          associations: [],
+        }),
       });
     }
 
