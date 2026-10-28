@@ -6,6 +6,7 @@ import {
   CONTACT_LEGAL_BASIS,
 } from '../../../lib/hubspotSubscriptions.mjs';
 import { syncMeetingParts } from '../../../lib/hubspotMeetingSync.mjs';
+import { describeDuplicateEmailError } from '../../../lib/hubspotErrors.mjs';
 
 // HubSpot 날짜 기반 API 버전. 번호 버전(v3/v4)은 2027년에 지원이 끝난다.
 const COMM_PREF_BASE = 'https://api.hubapi.com/communication-preferences/2026-09';
@@ -240,7 +241,8 @@ export async function POST(req) {
         console.error(`HubSpot PATCH after conflict failed [${patched.status}]:`, patched.result);
         return NextResponse.json(
           {
-            error: patched.result?.message || 'HubSpot 기존 연락처 업데이트에 실패했습니다.',
+            error: describeDuplicateEmailError(patched.result?.message)
+              || patched.result?.message || 'HubSpot 기존 연락처 업데이트에 실패했습니다.',
             id: existingId,
             merged: false,
           },
@@ -252,7 +254,7 @@ export async function POST(req) {
     if (!response.ok) {
       console.error(`HubSpot API error [${response.status}]:`, result);
       return NextResponse.json(
-        { error: result.message || 'HubSpot 연동 중 오류가 발생했습니다.' },
+        { error: describeDuplicateEmailError(result.message) || result.message || 'HubSpot 연동 중 오류가 발생했습니다.' },
         { status: response.status }
       );
     }
