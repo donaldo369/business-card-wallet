@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useId, useRef } from 'react';
+import React, { useId } from 'react';
 import { quickDateOptions, toDateValue } from '../lib/meetingInfo.mjs';
 
 /**
@@ -10,23 +10,17 @@ import { quickDateOptions, toDateValue } from '../lib/meetingInfo.mjs';
  */
 export default function MeetingInfoBox({ value, onChange, recentEvents = [], showSendSwitch = true, memoLabel, countLabel }) {
   const uid = useId();
-  const dateRef = useRef(null);
   const quick = quickDateOptions(new Date());
   const isCustomDate = !!value.met_on && !quick.some(q => q.value === value.met_on);
 
-  const openPicker = () => {
-    const el = dateRef.current;
-    if (!el) return;
-    if (typeof el.showPicker === 'function') {
-      try {
-        el.showPicker();
-        return;
-      } catch {
-        // 일부 브라우저는 showPicker 를 막는다 -> 아래 폴백
-      }
+  // 데스크톱 크롬 등은 날짜 입력칸 본문을 눌러도 달력이 안 열려서 직접 연다.
+  // 모바일은 입력칸을 실제로 탭하면 기본 날짜 선택기가 열리므로 실패해도 무시한다.
+  const openPicker = (e) => {
+    try {
+      e.currentTarget.showPicker?.();
+    } catch {
+      // 일부 브라우저는 showPicker 를 막는다 -> 기본 동작에 맡긴다
     }
-    el.focus();
-    el.click();
   };
 
   const needle = (value.event_name || '').trim().toLowerCase();
@@ -57,24 +51,20 @@ export default function MeetingInfoBox({ value, onChange, recentEvents = [], sho
               {q.label}
             </button>
           ))}
-          <button
-            type="button"
-            className={`group-chip${isCustomDate ? ' group-chip-active' : ''}`}
-            aria-pressed={isCustomDate}
-            onClick={openPicker}
-          >
+          {/* 모바일 브라우저(특히 iOS Safari)는 코드로 날짜 선택기를 열 수 없어,
+              투명한 실제 날짜 입력칸을 칩 위에 덮어 사용자의 탭이 입력칸에 직접 닿게 한다 */}
+          <span className={`group-chip meeting-date-chip${isCustomDate ? ' group-chip-active' : ''}`}>
             📅 {isCustomDate ? value.met_on : '날짜 선택'}
-          </button>
-          <input
-            ref={dateRef}
-            type="date"
-            className="meeting-date-hidden"
-            aria-label="만난 날짜 직접 선택"
-            tabIndex={-1}
-            value={value.met_on || ''}
-            max={toDateValue(new Date())}
-            onChange={e => e.target.value && onChange({ met_on: e.target.value })}
-          />
+            <input
+              type="date"
+              className="meeting-date-input"
+              aria-label="만난 날짜 직접 선택"
+              value={value.met_on || ''}
+              max={toDateValue(new Date())}
+              onClick={openPicker}
+              onChange={e => e.target.value && onChange({ met_on: e.target.value })}
+            />
+          </span>
         </div>
       </div>
 
